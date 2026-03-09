@@ -131,24 +131,27 @@ Main comparison plots:
 
 - [refine_y2_physical_models_vs_tp_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/refine_y2_physical_models_vs_tp_dm_tp_fitready_H1p000.png)
 - [refine_y2_physical_models_vs_theta_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/refine_y2_physical_models_vs_theta_dm_tp_fitready_H1p000.png)
+- [xi_fit_vs_tp_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/xi_fit_vs_tp_dm_tp_fitready_H1p000.png)
+- [xi_compare_models_vs_tp_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/xi_compare_models_vs_tp_dm_tp_fitready_H1p000.png)
 
 Summary tables:
 
 - [refine_y2_physical_models_dm_tp_fitready_H1p000.txt](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/refine_y2_physical_models_dm_tp_fitready_H1p000.txt)
 - [final_fit_summary_dm_tp_fitready_H1p000.txt](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/final_fit_summary_dm_tp_fitready_H1p000.txt)
-- [test_y2_tp_shape_ansatz_dm_tp_fitready_H1p000.txt](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/test_y2_tp_shape_ansatz_dm_tp_fitready_H1p000.txt)
-- [check_y2_tp_shape_stability_dm_tp_fitready_H1p000.txt](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/check_y2_tp_shape_stability_dm_tp_fitready_H1p000.txt)
+- [xi_compare_models_vs_tp_dm_tp_fitready_H1p000.txt](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/xi_compare_models_vs_tp_dm_tp_fitready_H1p000.txt)
+- [test_y2_tp_shape_ansatz_dm_tp_fitready_H1p000.txt](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/old_attempts/test_y2_tp_shape_ansatz_dm_tp_fitready_H1p000.txt)
+- [check_y2_tp_shape_stability_dm_tp_fitready_H1p000.txt](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/old_attempts/check_y2_tp_shape_stability_dm_tp_fitready_H1p000.txt)
 
 Fixed-`tp` benchmark plots:
 
-- [test_y2_tp_shape_ansatz_log_hilltop_plus_const_vs_tp_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/test_y2_tp_shape_ansatz_log_hilltop_plus_const_vs_tp_dm_tp_fitready_H1p000.png)
-- [test_y2_tp_shape_ansatz_pendulum_log_plus_const_vs_tp_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/test_y2_tp_shape_ansatz_pendulum_log_plus_const_vs_tp_dm_tp_fitready_H1p000.png)
-- [check_y2_tp_shape_stability_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/check_y2_tp_shape_stability_dm_tp_fitready_H1p000.png)
+- [test_y2_tp_shape_ansatz_log_hilltop_plus_const_vs_tp_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/old_attempts/test_y2_tp_shape_ansatz_log_hilltop_plus_const_vs_tp_dm_tp_fitready_H1p000.png)
+- [test_y2_tp_shape_ansatz_pendulum_log_plus_const_vs_tp_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/old_attempts/test_y2_tp_shape_ansatz_pendulum_log_plus_const_vs_tp_dm_tp_fitready_H1p000.png)
+- [check_y2_tp_shape_stability_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/old_attempts/check_y2_tp_shape_stability_dm_tp_fitready_H1p000.png)
 
 Model-search plots:
 
-- [search_y2_final_models_tradeoff_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/search_y2_final_models_tradeoff_dm_tp_fitready_H1p000.png)
-- [search_y2_final_models_best_params_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/search_y2_final_models_best_params_dm_tp_fitready_H1p000.png)
+- [search_y2_final_models_tradeoff_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/old_attempts/search_y2_final_models_tradeoff_dm_tp_fitready_H1p000.png)
+- [search_y2_final_models_best_params_dm_tp_fitready_H1p000.png](/home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/results/old_attempts/search_y2_final_models_best_params_dm_tp_fitready_H1p000.png)
 
 ## Benchmark model
 

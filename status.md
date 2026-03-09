@@ -261,20 +261,30 @@ Core outputs:
 - `ode/analysis/results/xi_panel_dm_tp_fitready_H1p000.png`
 - `ode/analysis/results/xi_over_tp32_vs_tp_dm_tp_fitready_H1p000.png`
 - `ode/analysis/results/xi_fanh_noPT_over_tp32_vs_tp_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/xi_fit_vs_tp_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/xi_compare_models_vs_tp_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/xi_compare_models_vs_tp_dm_tp_fitready_H1p000.txt`
 - `ode/analysis/results/y2_contour_dm_tp_fitready_H1p000.png`
 - `ode/analysis/results/y2_log10_contour_dm_tp_fitready_H1p000.png`
-- `ode/analysis/results/fit_y2_tp_powerlaw_dm_tp_fitready_H1p000.txt`
-- `ode/analysis/results/fit_y2_tp_powerlaw_dm_tp_fitready_H1p000.png`
-- `ode/analysis/results/fit_y2_tp_powerlaw_trends_dm_tp_fitready_H1p000.png`
-- `ode/analysis/results/fit_y2_coeff_shapes_fit_y2_tp_powerlaw_dm_tp_fitready_H1p000.txt`
-- `ode/analysis/results/fit_y2_coeff_shapes_fit_y2_tp_powerlaw_dm_tp_fitready_H1p000.png`
-- `ode/analysis/results/test_y2_tp_shape_ansatz_dm_tp_fitready_H1p000.txt`
-- `ode/analysis/results/test_y2_tp_shape_ansatz_log_hilltop_plus_const_vs_tp_dm_tp_fitready_H1p000.png`
-- `ode/analysis/results/test_y2_tp_shape_ansatz_pendulum_log_plus_const_vs_tp_dm_tp_fitready_H1p000.png`
-- `ode/analysis/results/check_y2_tp_shape_stability_dm_tp_fitready_H1p000.txt`
-- `ode/analysis/results/check_y2_tp_shape_stability_dm_tp_fitready_H1p000.png`
 - `ode/analysis/results/refine_y2_physical_models_dm_tp_fitready_H1p000.txt`
 - `ode/analysis/results/final_fit_summary_dm_tp_fitready_H1p000.txt`
+
+Old model-attempt outputs now live in:
+
+- `ode/analysis/results/old_attempts/fit_y2_tp_powerlaw_dm_tp_fitready_H1p000.txt`
+- `ode/analysis/results/old_attempts/fit_y2_tp_powerlaw_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/old_attempts/fit_y2_tp_powerlaw_trends_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/old_attempts/fit_y2_coeff_shapes_fit_y2_tp_powerlaw_dm_tp_fitready_H1p000.txt`
+- `ode/analysis/results/old_attempts/fit_y2_coeff_shapes_fit_y2_tp_powerlaw_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/old_attempts/test_y2_tp_shape_ansatz_dm_tp_fitready_H1p000.txt`
+- `ode/analysis/results/old_attempts/test_y2_tp_shape_ansatz_log_hilltop_plus_const_vs_tp_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/old_attempts/test_y2_tp_shape_ansatz_pendulum_log_plus_const_vs_tp_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/old_attempts/check_y2_tp_shape_stability_dm_tp_fitready_H1p000.txt`
+- `ode/analysis/results/old_attempts/check_y2_tp_shape_stability_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/old_attempts/search_y2_final_models_dm_tp_fitready_H1p000.txt`
+- `ode/analysis/results/old_attempts/search_y2_final_models_tradeoff_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/old_attempts/search_y2_final_models_best_params_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/old_attempts/search_y2_final_models_vs_theta_dm_tp_fitready_H1p000.png`
 
 ## Next Reasonable Step
 

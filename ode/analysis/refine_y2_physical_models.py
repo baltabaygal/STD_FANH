@@ -177,6 +177,33 @@ def plot_vs_theta(theta0, tp, y, results, out_path, dpi):
     plt.close(fig)
 
 
+def plot_xi_vs_tp(theta0, tp, xi, fanh_no, results, out_path, dpi):
+    fig, ax = plt.subplots(figsize=(8.0, 5.4))
+    colors = plt.cm.plasma(np.linspace(0.05, 0.95, len(np.unique(theta0))))
+    best = results[0]
+    xi_fit = best["yfit"] * np.power(tp, 1.5) / fanh_no
+
+    for color, th0 in zip(colors, np.unique(theta0)):
+        mask = np.isclose(theta0, th0)
+        idx = np.argsort(tp[mask])
+        x = tp[mask][idx]
+        xd = xi[mask][idx]
+        xf = xi_fit[mask][idx]
+        ax.plot(x, xd, "o", ms=3, color=color, alpha=0.75)
+        ax.plot(x, xf, "-", lw=1.7, color=color, label=rf"$\theta_0={th0:.3g}$")
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel(r"$t_p$")
+    ax.set_ylabel(r"$\xi$")
+    ax.set_title(best["name"] + rf", rel={best['global_rel_rmse']:.4e}")
+    ax.grid(alpha=0.25)
+    ax.legend(frameon=False, fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+
+
 def main():
     args = parse_args()
     data_path = Path(args.data).resolve()
@@ -199,11 +226,13 @@ def main():
     save_summary(outdir / f"refine_y2_physical_models_{stem}.txt", results)
     plot_vs_tp(theta0, tp, y, results, outdir / f"refine_y2_physical_models_vs_tp_{stem}.png", args.dpi)
     plot_vs_theta(theta0, tp, y, results, outdir / f"refine_y2_physical_models_vs_theta_{stem}.png", args.dpi)
+    plot_xi_vs_tp(theta0, tp, xi, fanh_no, results, outdir / f"xi_fit_vs_tp_{stem}.png", args.dpi)
 
     print(f"Loaded: {data_path}")
     print(f"Saved: {outdir / f'refine_y2_physical_models_{stem}.txt'}")
     print(f"Saved: {outdir / f'refine_y2_physical_models_vs_tp_{stem}.png'}")
     print(f"Saved: {outdir / f'refine_y2_physical_models_vs_theta_{stem}.png'}")
+    print(f"Saved: {outdir / f'xi_fit_vs_tp_{stem}.png'}")
     for r in results:
         print(
             f"{r['name']}: log={r['global_log_rmse']:.4e} rel={r['global_rel_rmse']:.4e} success={r['success']}"

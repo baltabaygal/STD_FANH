@@ -1,0 +1,4 @@
+# xi(tp) comparison: compact global fit vs pendulum-log slice benchmark
+compact_model powh_quadH_linC0
+compact_rel_rmse 5.3297120782e-03
+pendulum_slice_rel_rmse 2.5100035751e-03
