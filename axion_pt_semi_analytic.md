@@ -8,6 +8,33 @@ f_{\rm anh}(\theta_0,t_p) = \frac{a(t_p)}{(1-u^2)^{\alpha(t_p)}},\qquad u\equiv\
 
 and then explains methods to solve the driven nonlinear pendulum with *time-dependent viscous drag* that arises in our cosmological normalization.
 
+## Update
+
+The raw slice ansatz
+
+\[
+f_{\rm anh}(\theta_0,t_p) \sim \frac{a(t_p)}{(1-u^2)^{\alpha(t_p)}}
+\]
+
+should now be treated as a historical starting point, not the current best fit.
+
+What the repo now finds is:
+
+- the raw power family is not good enough on the current `Y2` table
+- the best fixed-`t_p` slice benchmark is
+
+  \[
+  Y_2(\theta_0,t_p) = c_0(t_p) + A(t_p)\left[\log\!\left(\frac{e}{\cos^2(\theta_0/2)}\right)\right]^{\alpha(t_p)}
+  \]
+
+- the best compact global model is instead a plateau-plus-powerlaw form in `t_p`
+
+\[
+Y_2(\theta_0,t_p) = c_0(\theta_0) + \frac{c_1(\theta_0)}{t_p^{p(\theta_0)}}.
+\]
+
+So this note is still useful as motivation for the hilltop control variable and the first-oscillation picture, but it no longer represents the final fit formula used in the repo.
+
 ---
 
 ## 1. Starting point: equation of motion and energy
@@ -231,4 +258,3 @@ If you want, I can now:
 - produce the analytic steps converting elliptic integral asymptotics to the explicit prefactor shown above (tracking constants such as \(B\) & \(\kappa\)).
 
 Which do you prefer next?
-
