@@ -19,26 +19,54 @@ def unique_sorted(arr):
     return np.array(sorted(set(float(x) for x in arr)), dtype=np.float64)
 
 
+def hilltop_proximity(theta0):
+    dist = abs((np.pi - abs(float(theta0))) / np.pi)
+    return 1.0 - min(max(dist, 0.0), 1.0)
+
+
+def adaptive_extra_after(
+    theta0,
+    tp,
+    t_star,
+    base_extra_after,
+    hilltop_boost,
+    hilltop_power,
+    tp_log_boost,
+    max_extra_factor,
+):
+    h = hilltop_proximity(theta0)
+    tp_ratio = max(float(tp) / max(float(t_star), 1e-12), 1.0)
+    tp_factor = 1.0 + float(tp_log_boost) * np.log10(tp_ratio)
+    hilltop_factor = 1.0 + float(hilltop_boost) * (h ** float(hilltop_power))
+    total_factor = min(float(max_extra_factor), tp_factor * hilltop_factor)
+    return float(base_extra_after) * total_factor
+
+
 def build_fit_tp_grid(
     h_star,
     tp_min_factor,
+    tp_ultradense_factor,
     tp_dense_factor,
     tp_mid_factor,
     tp_max_factor,
+    n_ultradense,
     n_dense,
     n_mid,
     n_tail,
 ):
     t_star = 1.0 / (2.0 * float(h_star))
     tp_min = max(1e-6, tp_min_factor * t_star)
+    tp_ultradense = max(tp_min * 1.001, tp_ultradense_factor * t_star)
     tp_dense = max(tp_min * 1.001, tp_dense_factor * t_star)
+    tp_dense = max(tp_ultradense * 1.001, tp_dense)
     tp_mid = max(tp_dense * 1.001, tp_mid_factor * t_star)
     tp_max = max(tp_mid * 1.001, tp_max_factor * t_star)
 
-    seg1 = np.logspace(np.log10(tp_min), np.log10(tp_dense), int(n_dense))
+    seg0 = np.logspace(np.log10(tp_min), np.log10(tp_ultradense), int(n_ultradense))
+    seg1 = np.logspace(np.log10(tp_ultradense), np.log10(tp_dense), int(n_dense))
     seg2 = np.logspace(np.log10(tp_dense), np.log10(tp_mid), int(n_mid))
     seg3 = np.logspace(np.log10(tp_mid), np.log10(tp_max), int(n_tail))
-    return unique_sorted(np.concatenate([seg1, seg2, seg3]))
+    return unique_sorted(np.concatenate([seg0, seg1, seg2, seg3]))
 
 
 def parse_args():
@@ -49,13 +77,15 @@ def parse_args():
     parser.add_argument("--outdir", type=str, default=".", help="Output directory.")
 
     # fit-ready grid defaults
-    parser.add_argument("--tp-min-factor", type=float, default=1.02)
+    parser.add_argument("--tp-min-factor", type=float, default=1.002)
+    parser.add_argument("--tp-ultradense-factor", type=float, default=1.25)
     parser.add_argument("--tp-dense-factor", type=float, default=6.0)
     parser.add_argument("--tp-mid-factor", type=float, default=40.0)
-    parser.add_argument("--tp-max-factor", type=float, default=250.0)
-    parser.add_argument("--n-dense", type=int, default=32)
-    parser.add_argument("--n-mid", type=int, default=22)
-    parser.add_argument("--n-tail", type=int, default=18)
+    parser.add_argument("--tp-max-factor", type=float, default=1200.0)
+    parser.add_argument("--n-ultradense", type=int, default=40)
+    parser.add_argument("--n-dense", type=int, default=36)
+    parser.add_argument("--n-mid", type=int, default=28)
+    parser.add_argument("--n-tail", type=int, default=28)
 
     parser.add_argument(
         "--theta0-list",
@@ -69,6 +99,10 @@ def parse_args():
     parser.add_argument("--t-start-nopt", type=float, default=1e-3)
     parser.add_argument("--t-end-min", type=float, default=900.0)
     parser.add_argument("--extra-after", type=float, default=500.0)
+    parser.add_argument("--extra-after-hilltop-boost", type=float, default=4.0)
+    parser.add_argument("--extra-after-hilltop-power", type=float, default=4.0)
+    parser.add_argument("--extra-after-tp-log-boost", type=float, default=0.35)
+    parser.add_argument("--extra-after-max-factor", type=float, default=8.0)
     parser.add_argument("--method", type=str, default="DOP853")
     parser.add_argument("--rtol", type=float, default=1e-8)
     parser.add_argument("--atol", type=float, default=1e-10)
@@ -83,12 +117,14 @@ def main():
     args = parse_args()
 
     if args.smoke:
+        args.n_ultradense = 8
         args.n_dense = 6
         args.n_mid = 4
         args.n_tail = 3
         args.theta0_list = args.theta0_list[:3]
         args.t_end_min = 300.0
         args.extra_after = 150.0
+        args.extra_after_max_factor = 4.0
         args.rtol = max(args.rtol, 1e-6)
         args.atol = max(args.atol, 1e-8)
 
@@ -101,9 +137,11 @@ def main():
     tp_grid = build_fit_tp_grid(
         h_star,
         args.tp_min_factor,
+        args.tp_ultradense_factor,
         args.tp_dense_factor,
         args.tp_mid_factor,
         args.tp_max_factor,
+        args.n_ultradense,
         args.n_dense,
         args.n_mid,
         args.n_tail,
@@ -165,11 +203,22 @@ def main():
             if tp < t_star:
                 continue
 
+            extra_after_eff = adaptive_extra_after(
+                th0,
+                tp,
+                t_star,
+                args.extra_after,
+                args.extra_after_hilltop_boost,
+                args.extra_after_hilltop_power,
+                args.extra_after_tp_log_boost,
+                args.extra_after_max_factor,
+            )
+
             ea3_pt, sol_pt = solve_PT(
                 th0,
                 tp,
                 t_end_min=args.t_end_min,
-                extra_after=args.extra_after,
+                extra_after=extra_after_eff,
                 method=args.method,
                 rtol=args.rtol,
                 atol=args.atol,

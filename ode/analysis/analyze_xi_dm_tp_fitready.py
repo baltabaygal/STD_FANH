@@ -35,7 +35,7 @@ def load_table(path):
     return arr
 
 
-def make_single_plot(tp, y, theta0, ylabel, title, out_path, dpi):
+def make_single_plot(tp, y, theta0, ylabel, title, out_path, dpi, xlim=None):
     fig, ax = plt.subplots(figsize=(7.8, 5.2))
     th_unique = np.unique(theta0)
     colors = plt.cm.plasma(np.linspace(0.05, 0.95, len(th_unique)))
@@ -51,6 +51,8 @@ def make_single_plot(tp, y, theta0, ylabel, title, out_path, dpi):
     ax.set_yscale("log")
     ax.set_xlabel(r"$t_p$")
     ax.set_ylabel(ylabel)
+    if xlim is not None:
+        ax.set_xlim(*xlim)
     ax.grid(alpha=0.25)
     ax.legend(frameon=False, ncol=2, fontsize=8)
     ax.set_title(title)
@@ -126,9 +128,11 @@ def main():
     fanh_pt = arr[:, 7]
     fanh_no = arr[:, 8]
     xi = arr[:, 9]
+    t_star = arr[0, 1]
 
     xi_over_tp32 = xi / np.power(tp, 1.5)
     xi_fanh_no_over_tp32 = xi * fanh_no / np.power(tp, 1.5)
+    low_tp_max = min(np.nanmax(tp), 4.0 * t_star)
 
     make_single_plot(
         tp,
@@ -156,6 +160,16 @@ def main():
         rf"Direct $t_p$ scan: $\xi_{{\rm DM}} f_{{\rm anh}}^{{\rm noPT}}/t_p^{{3/2}}$ at $H_*={h_star:g}$",
         outdir / f"xi_fanh_noPT_over_tp32_vs_tp_{data_path.stem}.png",
         args.dpi,
+    )
+    make_single_plot(
+        tp,
+        xi_fanh_no_over_tp32,
+        theta0,
+        r"$\xi_{\rm DM} f_{\rm anh}^{\rm noPT}(\theta_0)/t_p^{3/2}$",
+        rf"Low-$t_p$ zoom: $\xi_{{\rm DM}} f_{{\rm anh}}^{{\rm noPT}}/t_p^{{3/2}}$ at $H_*={h_star:g}$",
+        outdir / f"xi_fanh_noPT_over_tp32_vs_tp_lowtp_{data_path.stem}.png",
+        args.dpi,
+        xlim=(max(np.nanmin(tp) * 0.995, 1e-12), low_tp_max),
     )
 
     make_panel_plot(
@@ -192,6 +206,7 @@ def main():
     print(f"Saved: {outdir / f'xi_vs_tp_{data_path.stem}.png'}")
     print(f"Saved: {outdir / f'xi_over_tp32_vs_tp_{data_path.stem}.png'}")
     print(f"Saved: {outdir / f'xi_fanh_noPT_over_tp32_vs_tp_{data_path.stem}.png'}")
+    print(f"Saved: {outdir / f'xi_fanh_noPT_over_tp32_vs_tp_lowtp_{data_path.stem}.png'}")
     print(f"Saved: {outdir / f'xi_panel_{data_path.stem}.png'}")
     print(f"Saved: {ref_out}")
     print(f"Saved: {nopt_plot}")
