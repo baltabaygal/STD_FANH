@@ -107,6 +107,88 @@ Conclusion:
 
 - not adopted
 
+### 5. Older direct surface-powerlaw fit
+
+An earlier empirical surface fit used direct low-order functions of `u = theta0/pi` in
+
+\[
+Y_2(\theta_0,t_p) = c_0(u) + \frac{c_1(u)}{t_p^{p(u)}}.
+\]
+
+It was useful as a stepping stone, but it was superseded by the current pendulum-log based compact model.
+
+Conclusion:
+
+- removed from the curated results set
+
+### 6. Exponential-in-`t_p` transient benchmark
+
+Tested:
+
+\[
+Y_2(\theta_0,t_p) = c_0(\theta_0) + c_1(\theta_0)e^{-t_p/\tau(\theta_0)}
+\]
+
+against the plateau-plus-powerlaw description.
+
+Result:
+
+- it was much worse than the powerlaw transient
+
+Conclusion:
+
+- removed from the curated results set
+
+### 7. `eta` / `x_{\rm eff}` scaling and collapse tests
+
+Tested whether the curves collapse better when organized by control variables such as
+`eta ~ K(sin(theta0/2))/tp`, and whether normalized `Y2` curves share a common turnover.
+
+Result:
+
+- useful for interpretation
+- not competitive as the final fit formula
+
+Conclusion:
+
+- removed from the curated results set
+
+### 8. Legacy `f_anh` slice-fit variants
+
+Before switching the focus fully to `Y2`, several direct `f_anh(theta0,tp)` slice fits were tested:
+
+- raw power in `(1-u^2)^{-alpha}`
+- `sin(theta0/2)` variant
+- additive-constant version
+- shifted and reparameterized singularity versions
+- excess-over-plateau log-hilltop fits
+- simple transition models
+
+Result:
+
+- these were useful diagnostics early on
+- they are now superseded by the direct `Y2` analysis
+
+Conclusion:
+
+- removed from the curated results set
+
+### 9. Symbolic-regression experiments
+
+PySR runs were used to probe whether a cleaner symbolic formula could be recovered for
+the coefficient laws and the full surface.
+
+Result:
+
+- informative as a sanity check
+- not stable or clean enough to replace the current compact fit
+- raw search checkpoints produced clutter in `outputs/`
+
+Conclusion:
+
+- raw symbolic-regression outputs and checkpoint directories were removed
+- symbolic-regression attempts are not part of the curated result set
+
 ## Current Best Compact Description
 
 The best compact physical model currently is:
@@ -167,9 +249,25 @@ Core scripts:
 - `ode/analysis/test_y2_tp_shape_ansatz.py`
 - `ode/analysis/check_y2_tp_shape_stability.py`
 - `ode/analysis/refine_y2_physical_models.py`
+- `ode/analysis/search_y2_final_models.py`
+- `ode/analysis/fit_y2_tp_powerlaw.py`
+- `ode/analysis/fit_y2_coeff_shapes.py`
 
 Core outputs:
 
+- `ode/analysis/results/noPT_reference_dm_tp_fitready_H1p000.txt`
+- `ode/analysis/results/fanh_noPT_vs_theta0_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/xi_vs_tp_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/xi_panel_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/xi_over_tp32_vs_tp_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/xi_fanh_noPT_over_tp32_vs_tp_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/y2_contour_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/y2_log10_contour_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/fit_y2_tp_powerlaw_dm_tp_fitready_H1p000.txt`
+- `ode/analysis/results/fit_y2_tp_powerlaw_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/fit_y2_tp_powerlaw_trends_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/fit_y2_coeff_shapes_fit_y2_tp_powerlaw_dm_tp_fitready_H1p000.txt`
+- `ode/analysis/results/fit_y2_coeff_shapes_fit_y2_tp_powerlaw_dm_tp_fitready_H1p000.png`
 - `ode/analysis/results/test_y2_tp_shape_ansatz_dm_tp_fitready_H1p000.txt`
 - `ode/analysis/results/test_y2_tp_shape_ansatz_log_hilltop_plus_const_vs_tp_dm_tp_fitready_H1p000.png`
 - `ode/analysis/results/test_y2_tp_shape_ansatz_pendulum_log_plus_const_vs_tp_dm_tp_fitready_H1p000.png`
