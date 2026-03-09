@@ -1,0 +1,4 @@
+# Target: log(f_anh)
+# Data: /home/gala/Desktop/AXION_PT/CODES/STD_FANH/ode/analysis/data/dm_tp_fitready_H1p000.txt
+# Features: u, one_minus_u2, log_tp, inv_one_minus_u2
+Best (latex): 0.0272 log_{tp} u + \frac{5.03}{u + e^{log_{tp} + \sqrt{one_{minus u2}} + 1.41 one_{minus u2}}}
