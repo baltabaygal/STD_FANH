@@ -1,0 +1,23 @@
+# Shared-H lattice fit with fixed q=3/2 and fixed noPT law
+# lattice_data=/home/gala/Desktop/AXION_PT/CODES/STD_FANH/lattice_data/data/energy_ratio_by_theta_data_v9.txt
+# fixed_vw=0.900000
+# nopt_feature=hilltop_log1m fixed_A_f=3.9047143556e-01 fixed_alpha_f=1.8499066612e+00
+# baseline:     Y3 = Yinf + c fno^2 / tp^(3/2)
+# crossover_tp: Y3 = Yinf + c fno^2 / [tp^(3/2) (1 + (tp/zc)^r)]
+# crossover_x:  Y3 = Yinf + c fno^2 / [tp^(3/2) (1 + (x/zc)^r)], x=tp/t*=2H*tp
+
+# combined model A_inf gamma_inf c zc r chi2 chi2_red rel_rmse log_rmse n dof success
+baseline 1.5537531007e-01 2.2955738711e+00 1.0141791732e+00 nan nan 2.1184058283e+06 1.6421750607e+04 5.3490405828e-03 5.3283320432e-03 132 129 1
+# message `ftol` termination condition is satisfied.
+crossover_tp 1.5537531011e-01 2.2955738678e+00 1.0141791734e+00 9.6039498288e+00 9.4160562933e+00 2.1184058286e+06 1.6680360856e+04 5.3490405712e-03 5.3283320327e-03 132 127 1
+# message `ftol` termination condition is satisfied.
+crossover_x 1.5555853512e-01 2.3010129809e+00 1.0154935294e+00 4.9999999955e+01 1.8589576444e+00 2.1091326297e+06 1.6607343541e+04 5.2059889560e-03 5.1930028842e-03 132 127 1
+# message `ftol` termination condition is satisfied.
+
+# per_h model hstar chi2 chi2_red rel_rmse log_rmse n
+baseline 1.5 3.2810203247e+05 4.9712429162e+03 5.2724359119e-03 5.2492636860e-03 66
+baseline 2 1.7903037958e+06 2.7125815088e+04 5.4245635648e-03 5.4062441196e-03 66
+crossover_tp 1.5 3.2810204539e+05 4.9712431119e+03 5.2724358945e-03 5.2492636700e-03 66
+crossover_tp 2 1.7903037833e+06 2.7125814898e+04 5.4245635588e-03 5.4062441143e-03 66
+crossover_x 1.5 3.2972453642e+05 4.9958263094e+03 4.9956787322e-03 4.9781252105e-03 66
+crossover_x 2 1.7794080932e+06 2.6960728685e+04 5.4081268498e-03 5.3993358202e-03 66

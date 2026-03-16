@@ -1,0 +1,25 @@
+# Transition-family comparison on lattice xi data
+# fixed_vw=0.900000 fixed_q=1.500000
+# nopt_feature=hilltop_log1m fit_Af_alpha_from_PT=0 fixed_A_f=3.9047143556e-01 fixed_alpha_f=1.8499066612e+00
+# baseline: Y3 = Yinf + B/tp^q
+# gmean:    Y3 = (Yinf^m + (B/tp^q)^m)^(1/m)
+# supp_tc:  Y3 = Yinf + [B/tp^q] / [1 + (tp/tc)^r], tc=(B/Yinf)^(1/q)
+# supp_free:Y3 = Yinf + [B/tp^q] / [1 + (tp/tc)^r]
+
+# hstar family chi2 chi2_red aic bic rel_rmse log_rmse n dof success params
+1.5 gmean 1.1775279573e+05 1.8992386408e+03 1.1776079573e+05 1.1776955435e+05 7.8732365552e-03 7.8129757406e-03 66 62 1 nopt=hilltop_log1m A_f=3.904714e-01 gf=1.849907 A_inf=1.731156e-01 ginf=2.298787 c=1.031910 m=1.078341
+# message `ftol` termination condition is satisfied.
+1.5 supp_tc 1.2206013820e+05 1.9687119065e+03 1.2206813820e+05 1.2207689682e+05 7.9595998725e-03 7.8981698209e-03 66 62 1 nopt=hilltop_log1m A_f=3.904714e-01 gf=1.849907 A_inf=1.650320e-01 ginf=2.311911 c=1.929069 r=0.050000
+# message `ftol` termination condition is satisfied.
+1.5 baseline 1.6974857952e+05 2.6944218971e+03 1.6975457952e+05 1.6976114848e+05 3.8546469117e-03 3.8583675375e-03 66 63 1 nopt=hilltop_log1m A_f=3.904714e-01 gf=1.849907 A_inf=1.513407e-01 ginf=2.258280 c=1.024114
+# message `ftol` termination condition is satisfied.
+1.5 supp_free 1.6974857952e+05 2.7827635986e+03 1.6975857952e+05 1.6976952779e+05 3.8546472673e-03 3.8583679027e-03 66 61 1 nopt=hilltop_log1m A_f=3.904714e-01 gf=1.849907 A_inf=1.513407e-01 ginf=2.258280 c=1.024114 tc=14.403416 r=14.209553
+# message `ftol` termination condition is satisfied.
+2 supp_tc 1.6121825465e+06 2.6002944298e+04 1.6121905465e+06 1.6121993051e+06 1.0356617541e-02 1.0449931461e-02 66 62 1 nopt=hilltop_log1m A_f=3.904714e-01 gf=1.849907 A_inf=1.547552e-01 ginf=2.203077 c=1.019955 r=7.374151
+# message `ftol` termination condition is satisfied.
+2 baseline 1.6394453772e+06 2.6022942494e+04 1.6394513772e+06 1.6394579461e+06 5.7979138157e-03 5.8086172789e-03 66 63 1 nopt=hilltop_log1m A_f=3.904714e-01 gf=1.849907 A_inf=1.539973e-01 ginf=2.216776 c=1.019479
+# message `xtol` termination condition is satisfied.
+2 gmean 1.6387421095e+06 2.6431324346e+04 1.6387501095e+06 1.6387588681e+06 5.8763405811e-03 5.8900530437e-03 66 62 1 nopt=hilltop_log1m A_f=3.904714e-01 gf=1.849907 A_inf=1.518765e-01 ginf=2.212078 c=1.019175 m=0.993930
+# message `xtol` termination condition is satisfied.
+2 supp_free 1.6394453772e+06 2.6876153724e+04 1.6394553772e+06 1.6394663254e+06 5.7979144216e-03 5.8086178990e-03 66 61 1 nopt=hilltop_log1m A_f=3.904714e-01 gf=1.849907 A_inf=1.539973e-01 ginf=2.216776 c=1.019479 tc=8.570387 r=10.157466
+# message `ftol` termination condition is satisfied.

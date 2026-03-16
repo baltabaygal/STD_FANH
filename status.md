@@ -6,6 +6,11 @@ Current analysis focuses on the direct `t_p` scan at fixed `H_* = 1` from:
 
 - `ode/analysis/data/dm_tp_fitready_H1p000.txt`
 
+Latest cross-checks also include lattice comparisons at `H_* = 1.5, 2.0` using:
+
+- `lattice_data/data/rho_noPT_data.txt`
+- `lattice_data/data/energy_ratio_by_theta_data_v9.txt`
+
 Main derived quantity:
 
 \[
@@ -189,6 +194,138 @@ Conclusion:
 - raw symbolic-regression outputs and checkpoint directories were removed
 - symbolic-regression attempts are not part of the curated result set
 
+### 10. Two-limit transition models
+
+Tested compact forms that enforce both physical endpoints:
+
+- small-`x = t_p / t_osc^noPT` should recover the no-PT limit
+- large `t_p` should approach a finite plateau
+
+The main matched-power form was
+
+\[
+Y_2(\theta_0,t_p) =
+Y_\infty(\theta_0)
+\left[
+1 + \left(\frac{t_c(\theta_0)}{t_p}\right)^{q(\theta_0)}
+\right]^{\frac{3}{2q(\theta_0)}},
+\qquad
+t_c(\theta_0)=\left(\frac{f_{\rm anh}^{\rm noPT}(\theta_0)}{Y_\infty(\theta_0)}\right)^{2/3}.
+\]
+
+Result:
+
+- as a compact global model, the best matched-power version reached relative RMSE `4.9349e-03`
+- using the analytic `f_anh_noPT(theta0)` fit instead of the table only shifted this to `5.0295e-03`
+- as a free per-`\theta_0` slice family it was worse than the unconstrained powerlaw slices: `7.2113e-03` vs `4.2907e-03`
+- the mismatch is mainly at large `\theta_0`, especially close to the hilltop
+
+I also tested a sigmoid-in-log / logistic blending transition in `log(t_p/t_c)`.
+
+Result:
+
+- it failed badly
+- free-slice relative RMSE was `2.0428e-01`
+- best compact global relative RMSE was `2.0025e-01`
+- the fitted sharpness parameter saturated at the imposed upper bound, indicating the family itself is not appropriate here
+
+Conclusion:
+
+- the matched-power two-limit model is a promising compact alternative
+- the current 7-parameter `c0 + c1 / t_p^p` model remains the default until the matched form is reviewed more carefully
+- the logistic-in-log blending attempt was rejected and removed from the working comparison script
+
+### 11. Lattice no-PT calibration and fixed-`q` PT fits
+
+To understand the lattice mismatch better, I separated the no-PT sector from the PT transition sector using:
+
+- `lattice_data/data/rho_noPT_data.txt`
+- `lattice_data/data/energy_ratio_by_theta_data_v9.txt`
+
+For the `v9` lattice files, the wall velocity is fixed by the filename:
+
+\[
+v_w = 0.9.
+\]
+
+The raw lattice no-PT data factorize very well as
+
+\[
+\rho_{\rm noPT}(\theta_0,H_*) \simeq C(H_*)\,(1-\cos\theta_0)\,f_{\rm rel}(\theta_0),
+\]
+
+with small residual interaction:
+
+- `interaction_std_log = 1.0650e-02`
+- `interaction_max_log = 3.2130e-02`
+
+The extracted relative no-PT curve agrees with the ODE no-PT reference well:
+
+- all available `H_*`: relative RMSE `7.5127e-03`
+- restricting to lattice `H_* = 1.5, 2.0`: relative RMSE `6.5976e-03`
+
+This showed that the old no-PT ansatz
+
+\[
+f_{\rm anh}^{\rm noPT}(\theta_0)=A_f\,[\log(e/\cos^2(\theta_0/2))]^{\gamma_f}
+\]
+
+is too rigid for the lattice-facing fits. Its ODE no-PT fit quality is only:
+
+- relative RMSE `1.1681e-01`
+
+The better lattice-motivated no-PT parameterization is
+
+\[
+L(\theta_0) = \log\!\left(\frac{e}{1-(\theta_0/\pi)^2}\right),
+\qquad
+f_{\rm anh}^{\rm noPT}(\theta_0)=A_f\,L(\theta_0)^{\alpha_f},
+\]
+
+with fitted parameters
+
+- `A_f = 3.9047143556e-01`
+- `alpha_f = 1.8499066612e+00`
+
+and ODE no-PT fit quality:
+
+- relative RMSE `1.4800e-02`
+
+Using this fixed no-PT law and fixing `q = 3/2`, the current working lattice fit is
+
+\[
+\xi(\theta_0,t_p)=
+\frac{t_p^{3/2}}{\left[f_{\rm anh}^{\rm noPT}(\theta_0)\right]^2}
+\left[
+f_{\rm anh}^{\infty}(\theta_0)
++
+c\,\frac{\left[f_{\rm anh}^{\rm noPT}(\theta_0)\right]^2}{t_p^{3/2}}
+\right],
+\]
+
+with
+
+\[
+f_{\rm anh}^{\infty}(\theta_0)=A_\infty\,L(\theta_0)^{\gamma_\infty}.
+\]
+
+Best fixed-`q` lattice fits:
+
+- `H_* = 1.5`: `A_inf = 1.5134072092e-01`, `gamma_inf = 2.2582802732e+00`, `c = 1.0241139892e+00`, relative RMSE `3.8546e-03`
+- `H_* = 2.0`: `A_inf = 1.5399728334e-01`, `gamma_inf = 2.2167756787e+00`, `c = 1.0194792055e+00`, relative RMSE `5.7979e-03`
+
+Important follow-up checks:
+
+- once the new no-PT law is fixed, adding the old crossover factor in `t_p` no longer improves the fit materially; the fitted `t_c` runs large and the transition factor is effectively switched off
+- replacing `t_p` by `x=t_p/t_*=2H_* t_p` in a shared-`H_*` fit only changes the combined relative RMSE from `5.3490e-03` to `5.2060e-03`, so the remaining tension is not mainly the choice of transition variable
+- the remaining mismatch still grows with `theta_0`, and `H_* = 2.0` is statistically harsher because its lattice SEMs are smaller
+
+Conclusion:
+
+- the old lattice mismatch was driven in large part by the no-PT parameterization, not only by the PT transition shape
+- the current lattice working model should keep `v_w = 0.9` fixed, keep `q = 3/2` fixed, and keep the new no-PT law fixed
+- the next transition-side work should focus on the remaining `\theta_0`/`H_*` dependence in the PT sector, not on refitting the no-PT law again
+
 ## Current Best Compact Description
 
 The best compact physical model currently is:
@@ -239,8 +376,10 @@ Conclusion:
 - the old raw power family fails even after allowing `A(t_p)` and `alpha(t_p)` freedom
 - the data prefer a plateau plus algebraic transient in `t_p`
 - the best angular control variable found so far is the pendulum-log hilltop variable
+- for lattice-facing no-PT fits, the better control variable is currently `L(\theta_0)=\log(e/(1-(\theta_0/\pi)^2))`
 - if the goal is the best slice benchmark, use `pendulum_log + c0(t_p)`
 - if the goal is the best compact global formula, use the 7-parameter `c0 + c1 / t_p^p` model
+- if the goal is the current best lattice working fit, use fixed `v_w=0.9`, fixed `q=3/2`, and the fixed no-PT hilltop-log law from section 11
 
 ## Useful Files
 
@@ -252,6 +391,10 @@ Core scripts:
 - `ode/analysis/search_y2_final_models.py`
 - `ode/analysis/fit_y2_tp_powerlaw.py`
 - `ode/analysis/fit_y2_coeff_shapes.py`
+- `ode/analysis/compare_y2_matched_limit_model.py`
+- `ode/analysis/analyze_lattice_nopt_rho.py`
+- `ode/analysis/fit_xi_lattice_crossover_shape.py`
+- `ode/analysis/fit_lattice_shared_transition_variable.py`
 
 Core outputs:
 
@@ -268,6 +411,12 @@ Core outputs:
 - `ode/analysis/results/y2_log10_contour_dm_tp_fitready_H1p000.png`
 - `ode/analysis/results/refine_y2_physical_models_dm_tp_fitready_H1p000.txt`
 - `ode/analysis/results/final_fit_summary_dm_tp_fitready_H1p000.txt`
+- `ode/analysis/results/lattice_fit/noPT_rho_study/lattice_nopt_summary.txt`
+- `ode/analysis/results/lattice_fit/noPT_rho_study/lattice_nopt_relative_collapse.png`
+- `ode/analysis/results/lattice_fit/crossover_shape_v9_fixed_nopt_hilltoplog/fit_xi_lattice_crossover_shape_summary.txt`
+- `ode/analysis/results/lattice_fit/crossover_shape_v9_fixed_nopt_hilltoplog/fit_xi_lattice_crossover_shape_H1p5.png`
+- `ode/analysis/results/lattice_fit/crossover_shape_v9_fixed_nopt_hilltoplog/fit_xi_lattice_crossover_shape_H2p0.png`
+- `ode/analysis/results/lattice_fit/shared_transition_variable_v9_fixed_nopt_hilltoplog/fit_lattice_shared_transition_variable_summary.txt`
 
 Old model-attempt outputs now live in:
 
@@ -285,11 +434,14 @@ Old model-attempt outputs now live in:
 - `ode/analysis/results/old_attempts/search_y2_final_models_tradeoff_dm_tp_fitready_H1p000.png`
 - `ode/analysis/results/old_attempts/search_y2_final_models_best_params_dm_tp_fitready_H1p000.png`
 - `ode/analysis/results/old_attempts/search_y2_final_models_vs_theta_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/old_attempts/compare_y2_matched_limit_model_dm_tp_fitready_H1p000.txt`
+- `ode/analysis/results/old_attempts/compare_y2_matched_limit_slices_dm_tp_fitready_H1p000.png`
+- `ode/analysis/results/old_attempts/compare_y2_matched_limit_global_dm_tp_fitready_H1p000.png`
 
 ## Next Reasonable Step
 
-If we want a better semi-analytic closure, the next target is not the old raw power law. It is:
+If we want a better semi-analytic closure, the next target is now split by use case:
 
-1. fit smooth laws for `c0(t_p)`, `A(t_p)`, and `alpha(t_p)` in the stable slice benchmark
-2. try to derive those laws from the first-oscillation energy-loss picture
-3. keep the 7-parameter compact model as the default global fit unless a cleaner derivation appears
+1. for the ODE `H_* = 1` compact description, keep the 7-parameter `c0 + c1/t_p^p` model as the repo default unless a cleaner derivation appears
+2. for the lattice comparison, keep `v_w = 0.9`, `q = 3/2`, and the fixed no-PT hilltop-log law, and focus on the remaining PT-sector transition mismatch at larger `\theta_0`
+3. test whether the residual `H_* = 2.0` tension is coming from explicit `H_*` dependence in `f_{\rm anh}^{\infty}` / the PT plateau sector or from the `\beta/H_* \to t_p` mapping, rather than from the no-PT law

@@ -1,0 +1,17 @@
+# Lattice noPT rho study
+# raw rho_noPT_data factorizes very well as C(H_*) * (1-cos(theta0)) * f_rel(theta0)
+# factorization_metrics interaction_std_log=1.0649790912e-02 interaction_max_log=3.2129605560e-02
+# all_H_vs_ODE rel_rmse=7.5126836277e-03 hilltop_delta_frac=1.5251446713e-03
+# H15_H20_vs_ODE rel_rmse=6.5976474240e-03 hilltop_delta_frac=-1.2610966706e-02
+# current_analytic_Ahgamma_vs_ODE rel_rmse=1.3350060512e-01 hilltop_delta_frac=-8.0903617284e-03
+# trial_hilltoplog_A_Lalpha_vs_ODE rel_rmse=2.7968742214e-02 hilltop_delta_frac=2.8408758143e-02
+# fit_to_ODE_absolute pendulum_log A_f=3.1215952865e-01 alpha_f=1.3173760431e+00 rel_rmse=1.1681076858e-01
+# fit_to_ODE_absolute hilltop_log1m A_f=3.9047143556e-01 alpha_f=1.8499066612e+00 rel_rmse=1.4800275998e-02
+
+# theta0 deg allH_minus_ODE_pct H15H20_minus_ODE_pct analytic_minus_ODE_pct trial_minus_ODE_pct
+0.2617993878 15.000000 0.0000000000e+00 0.0000000000e+00 0.0000000000e+00 0.0000000000e+00
+0.7853981634 45.000000 6.9004007426e-01 1.8879675613e-01 6.1874843413e+00 1.1031501039e+00
+1.3089969390 75.000000 9.6238111830e-01 5.5716824229e-01 1.5257349231e+01 2.7553174272e+00
+1.8325957146 105.000000 1.1387720713e+00 8.2132712461e-01 2.1439873820e+01 3.9496121938e+00
+2.3561944902 135.000000 8.1488017731e-01 2.6708954205e-02 1.8383424518e+01 3.8021449621e+00
+2.8797932658 165.000000 1.5251446713e-01 -1.2610966706e+00 -8.0903617284e-01 2.8408758143e+00

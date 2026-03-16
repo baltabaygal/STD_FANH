@@ -1,0 +1,13 @@
+# Asymptotic xi model fit
+# xi(theta,tp) = tp^(3/2)/fanh_noPT(theta)^2 * (fanh_infty(theta) + c * fanh_noPT(theta)^2 / tp^q)
+# fanh_noPT(theta) = A_f * h(theta)^gamma_f with A_f=3.6376983186e-01 gamma_f=1.1689630004e+00 rel_rmse=7.9840833099e-02 log_rmse=7.9910612453e-02
+
+# subset q_mode A_inf gamma_inf c q rel_rmse log_rmse chi2_rel chi2_rel_red chi2_log chi2_log_red n dof success
+all free 1.8682041498e-01 1.3810120581e+00 9.0802608193e-01 1.5387953640e+00 5.8065153746e-02 5.6974481954e-02 2.6095890496e+00 3.3890766878e-03 2.5124748937e+00 3.2629544074e-03 774 770 1
+# message `ftol` termination condition is satisfied.
+all fixed 1.8580145715e-01 1.3747397625e+00 9.4547503811e-01 1.5000000000e+00 5.8851662801e-02 5.8025025281e-02 2.6807630980e+00 3.4769949390e-03 2.6059833546e+00 3.3800043509e-03 774 771 1
+# message `ftol` termination condition is satisfied.
+smalltp free 1.5261729849e-01 1.7394806831e+00 8.9558297952e-01 1.5530204768e+00 9.3236180244e-03 9.2715625093e-03 3.3902642695e-02 8.7830680557e-05 3.3525129832e-02 8.6852667959e-05 390 386 1
+# message `ftol` termination condition is satisfied.
+smalltp fixed 1.4066809760e-01 1.6538721025e+00 9.7060893151e-01 1.5000000000e+00 1.0199465619e-02 1.0168310039e-02 4.0571348577e-02 1.0483552604e-04 4.0323866332e-02 1.0419603703e-04 390 387 1
+# message `ftol` termination condition is satisfied.

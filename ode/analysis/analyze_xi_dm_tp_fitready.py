@@ -62,9 +62,17 @@ def make_single_plot(tp, y, theta0, ylabel, title, out_path, dpi, xlim=None):
 
 
 def make_panel_plot(tp, curves, theta0, titles, ylabels, suptitle, out_path, dpi):
-    fig, axes = plt.subplots(3, 2, figsize=(11.5, 12.0), sharex=True)
-    axes = axes.ravel()
     th_unique = np.unique(theta0)
+    n_panels = len(th_unique)
+    ncols = 2
+    nrows = int(np.ceil(n_panels / ncols))
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(11.5, 3.8 * nrows),
+        sharex=True,
+    )
+    axes = np.atleast_1d(axes).ravel()
     colors = plt.cm.plasma(np.linspace(0.05, 0.95, len(th_unique)))
 
     for panel_idx, th0 in enumerate(th_unique):
@@ -84,11 +92,14 @@ def make_panel_plot(tp, curves, theta0, titles, ylabels, suptitle, out_path, dpi
         ax.set_yscale("log")
         ax.set_title(rf"$\theta_0={th0:.3g}$")
         ax.grid(alpha=0.25)
-        if panel_idx >= 4:
+        if panel_idx >= (nrows - 1) * ncols:
             ax.set_xlabel(r"$t_p$")
         if panel_idx % 2 == 0:
             ax.set_ylabel(ylabels)
         ax.legend(frameon=False, fontsize=7)
+
+    for panel_idx in range(n_panels, len(axes)):
+        axes[panel_idx].axis("off")
 
     fig.suptitle(suptitle, y=0.995)
     fig.tight_layout(rect=[0, 0, 1, 0.985])
@@ -131,7 +142,12 @@ def main():
     t_star = arr[0, 1]
 
     xi_over_tp32 = xi / np.power(tp, 1.5)
+    xi_over_fanh_no_q1_tp32 = xi / (fanh_no * np.power(tp, 1.5))
+    xi_over_fanh_no_q2_tp32 = xi / (np.square(fanh_no) * np.power(tp, 1.5))
+    xi_over_fanh_no_q3_tp32 = xi / (np.power(fanh_no, 3) * np.power(tp, 1.5))
     xi_fanh_no_over_tp32 = xi * fanh_no / np.power(tp, 1.5)
+    y2_fanh_no = xi * np.square(fanh_no) / np.power(tp, 1.5)
+    y4 = xi * np.power(fanh_no, 3) / np.power(tp, 1.5)
     low_tp_max = min(np.nanmax(tp), 4.0 * t_star)
 
     make_single_plot(
@@ -154,6 +170,33 @@ def main():
     )
     make_single_plot(
         tp,
+        xi_over_fanh_no_q1_tp32,
+        theta0,
+        r"$\xi_{\rm DM}/\left(f_{\rm anh}^{\rm noPT} t_p^{3/2}\right)$",
+        rf"Direct $t_p$ scan: $\xi_{{\rm DM}}/(f_{{\rm anh}}^{{\rm noPT}} t_p^{{3/2}})$ at $H_*={h_star:g}$",
+        outdir / f"xi_over_fanh_noPT_q1_tp32_vs_tp_{data_path.stem}.png",
+        args.dpi,
+    )
+    make_single_plot(
+        tp,
+        xi_over_fanh_no_q2_tp32,
+        theta0,
+        r"$\xi_{\rm DM}/\left((f_{\rm anh}^{\rm noPT})^2 t_p^{3/2}\right)$",
+        rf"Direct $t_p$ scan: $\xi_{{\rm DM}}/((f_{{\rm anh}}^{{\rm noPT}})^2 t_p^{{3/2}})$ at $H_*={h_star:g}$",
+        outdir / f"xi_over_fanh_noPT_q2_tp32_vs_tp_{data_path.stem}.png",
+        args.dpi,
+    )
+    make_single_plot(
+        tp,
+        xi_over_fanh_no_q3_tp32,
+        theta0,
+        r"$\xi_{\rm DM}/\left((f_{\rm anh}^{\rm noPT})^3 t_p^{3/2}\right)$",
+        rf"Direct $t_p$ scan: $\xi_{{\rm DM}}/((f_{{\rm anh}}^{{\rm noPT}})^3 t_p^{{3/2}})$ at $H_*={h_star:g}$",
+        outdir / f"xi_over_fanh_noPT_q3_tp32_vs_tp_{data_path.stem}.png",
+        args.dpi,
+    )
+    make_single_plot(
+        tp,
         xi_fanh_no_over_tp32,
         theta0,
         r"$\xi_{\rm DM} f_{\rm anh}^{\rm noPT}(\theta_0)/t_p^{3/2}$",
@@ -170,6 +213,24 @@ def main():
         outdir / f"xi_fanh_noPT_over_tp32_vs_tp_lowtp_{data_path.stem}.png",
         args.dpi,
         xlim=(max(np.nanmin(tp) * 0.995, 1e-12), low_tp_max),
+    )
+    make_single_plot(
+        tp,
+        y2_fanh_no,
+        theta0,
+        r"$Y_2 f_{\rm anh}^{\rm noPT} = \xi_{\rm DM}\left(f_{\rm anh}^{\rm noPT}\right)^2/t_p^{3/2}$",
+        rf"Direct $t_p$ scan: $Y_2 f_{{\rm anh}}^{{\rm noPT}}$ at $H_*={h_star:g}$",
+        outdir / f"y2_fanh_noPT_vs_tp_{data_path.stem}.png",
+        args.dpi,
+    )
+    make_single_plot(
+        tp,
+        y4,
+        theta0,
+        r"$Y_4 = \xi_{\rm DM}\left(f_{\rm anh}^{\rm noPT}\right)^3/t_p^{3/2}$",
+        rf"Direct $t_p$ scan: $Y_4$ at $H_*={h_star:g}$",
+        outdir / f"y4_vs_tp_{data_path.stem}.png",
+        args.dpi,
     )
 
     make_panel_plot(
@@ -205,8 +266,13 @@ def main():
     print(f"H_star={h_star:g}")
     print(f"Saved: {outdir / f'xi_vs_tp_{data_path.stem}.png'}")
     print(f"Saved: {outdir / f'xi_over_tp32_vs_tp_{data_path.stem}.png'}")
+    print(f"Saved: {outdir / f'xi_over_fanh_noPT_q1_tp32_vs_tp_{data_path.stem}.png'}")
+    print(f"Saved: {outdir / f'xi_over_fanh_noPT_q2_tp32_vs_tp_{data_path.stem}.png'}")
+    print(f"Saved: {outdir / f'xi_over_fanh_noPT_q3_tp32_vs_tp_{data_path.stem}.png'}")
     print(f"Saved: {outdir / f'xi_fanh_noPT_over_tp32_vs_tp_{data_path.stem}.png'}")
     print(f"Saved: {outdir / f'xi_fanh_noPT_over_tp32_vs_tp_lowtp_{data_path.stem}.png'}")
+    print(f"Saved: {outdir / f'y2_fanh_noPT_vs_tp_{data_path.stem}.png'}")
+    print(f"Saved: {outdir / f'y4_vs_tp_{data_path.stem}.png'}")
     print(f"Saved: {outdir / f'xi_panel_{data_path.stem}.png'}")
     print(f"Saved: {ref_out}")
     print(f"Saved: {nopt_plot}")
