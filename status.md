@@ -467,6 +467,63 @@ Conclusion:
 - this remains the recommended final formula in the repo
 - it is slightly worse than the slice-by-slice pendulum-log benchmark, but far more compact and interpretable
 
+### 13. vw-dependence diagnosis: effective-time correction and parameter evolution
+
+Two diagnostic studies were run to understand why the FANH collapse model degrades at lower wall velocities.
+
+All fits used lattice data at `H_* = 0.5, 1.0, 1.5, 2.0` for each of the four wall velocities `v_w \in \{0.3, 0.5, 0.7, 0.9\}`.
+
+#### 13a. Effective-time correction study (`study_vw_teff_correction.py`)
+
+The reference collapse model was fitted to the `v_w = 0.9` data, giving
+
+- `beta = -0.097`, `t_c = 2.996`, `r = 4.167`, relative RMSE `1.6\%`
+
+Then, for each other `v_w`, two corrections to `t_p` were scanned while keeping all model parameters fixed to the `v_w = 0.9` reference:
+
+- **multiplicative**: `t_p \to t_p \cdot s_{v_w}`
+- **additive**: `t_p \to t_p + \delta_{v_w}`
+
+Results:
+
+| \(v_w\) | no correction | multiplicative | additive |
+|---------|--------------|----------------|---------|
+| 0.9 | 1.6\% | 1.6\% (s=1) | 1.6\% |
+| 0.7 | 2.5\% | 2.2\% (s=1.02) | 1.8\% |
+| 0.5 | 7.4\% | 5.6\% (s=1.07) | 3.1\% |
+| 0.3 | 11.6\% | 8.3\% (s=1.11) | 3.7\% |
+
+The additive shift is far more effective than the multiplicative rescaling.  At `v_w = 0.3` it recovers 3× more accuracy.  The best-fit shifts are approximately
+
+- `delta(0.7) approx 0.033`, `delta(0.5) approx 0.131`, `delta(0.3) approx 0.225`
+
+which grow as `v_w` decreases and are consistent with a `A * (1/v_w - 1/v_{w,ref})` scaling.
+
+Physical interpretation: slow bubble walls add a roughly constant propagation delay before the axion field fully transitions.  This is a phase offset in `t_p`, not a time dilation.
+
+#### 13b. Parameter evolution study (`study_vw_param_evolution.py`)
+
+For each `v_w` independently, the best collapse exponent and FANH parameters were found:
+
+| \(v_w\) | \(\beta\) | \(t_c\) | \(r\) | in-sample RMSE | LOO RMSE |
+|---------|-----------|---------|-------|----------------|----------|
+| 0.9 | \(-0.097\) | 2.996 | 4.17 | 1.6\% | 2.8\% |
+| 0.7 | \(-0.084\) | 2.891 | 4.31 | 2.0\% | 2.4\% |
+| 0.5 | \(-0.112\) | 2.325 | 5.64 | 5.7\% | 4.9\% |
+| 0.3 | \(-0.043\) | 2.504 | 5.71 | 6.5\% | 13.6\% |
+
+Key observations:
+
+- `beta` is nearly constant across all `v_w` (range \(-0.04\) to \(-0.11\)), confirming that the `H_*` scaling is not the source of the degradation.
+- The transient exponent `r` increases significantly at low `v_w` (from \(\sim 4\) to \(\sim 5.7\)), indicating a sharper transient shape for slow walls.
+- The LOO error for `v_w = 0.3` (13.6\%) is much larger than its in-sample error (6.5\%), meaning the `v_w = 0.3` dynamics are not smoothly interpolable from the higher-`v_w` fits.
+
+Conclusion:
+
+- the dominant source of degradation is a `v_w`-dependent additive offset in `t_p`, not a rescaling of the time axis or a change in the `H_*` collapse exponent
+- the next targeted step is to fit a single global formula `delta(v_w) = A \cdot (1/v_w - 1/v_{w,ref})` and fold this additive correction into the model
+- additionally, the jump in `r` at low `v_w` may require a vw-dependent transient shape, which could be the secondary correction after the time shift is absorbed
+
 ## Interpretation
 
 - strict separability `f(\theta_0) g(t_p)` is not supported by the data
@@ -478,6 +535,7 @@ Conclusion:
 - if the goal is the best compact global formula, use the 7-parameter `c0 + c1 / t_p^p` model
 - if the goal is the current best lattice working fit, use fixed `v_w=0.9`, fixed `q=3/2`, and the fixed no-PT hilltop-log law from section 11
 - if the goal is the current best lattice `H_*` extension, use the `v_w=0.9` collapsed-coordinate fit with a scalar negative amplitude exponent `\gamma \simeq -0.12`
+- if the goal is extending the model to all `v_w`, the leading correction is an additive `t_p` shift `delta(v_w) = A*(1/v_w - 1/v_{w,ref})`; pure multiplicative rescaling is insufficient
 
 ## Useful Files
 
@@ -497,6 +555,8 @@ Core scripts:
 - `measure_gamma_and_refit.py`
 - `compare_vw_collapse_results.py`
 - `compare_vw_gamma_results.py`
+- `study_vw_teff_correction.py`
+- `study_vw_param_evolution.py`
 
 Core outputs:
 
@@ -560,3 +620,4 @@ If we want a better semi-analytic closure, the next target is now split by use c
 2. for the lattice comparison, keep `v_w = 0.9`, the fixed no-PT hilltop-log law, and treat the scalar negative amplitude exponent `\gamma \simeq -0.12` as the current best empirical `H_*` correction
 3. test whether that scalar `\gamma` is a real physical `H_*` amplitude dependence or is instead absorbing a remaining transition-shape mismatch in the PT sector
 4. keep the lower-`v_w` scalar-`\gamma` results as provisional only, because those fits still run to extreme `t_c`/`r` values and are not yet stable
+5. for multi-`v_w` universality: fit a single global formula `delta(v_w) = A*(1/v_w - 1/0.9)` and test whether folding this additive shift into the FANH model unifies all four wall velocities; also check whether a `v_w`-dependent `r` is needed as a secondary correction
