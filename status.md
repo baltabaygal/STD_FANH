@@ -326,6 +326,103 @@ Conclusion:
 - the current lattice working model should keep `v_w = 0.9` fixed, keep `q = 3/2` fixed, and keep the new no-PT law fixed
 - the next transition-side work should focus on the remaining `\theta_0`/`H_*` dependence in the PT sector, not on refitting the no-PT law again
 
+### 12. Collapsed-coordinate fits and scalar-`\gamma` amplitude tests
+
+I then tested whether the remaining `H_*` dependence can be absorbed by a single collapsed coordinate
+
+\[
+x = t_p\,H_*^\beta,
+\]
+
+and, if not, whether a residual amplitude factor
+
+\[
+f_{\rm anhr}(\theta_0,t_p,H_*) = H_*^\gamma\,f_{\rm univ}(\theta_0,x)
+\]
+
+is enough to describe the lattice data.
+
+For the full `v9` dataset (`v_w = 0.9`) across `H_* = 0.5, 1.0, 1.5, 2.0`, the best collapse exponent is
+
+- `beta = -9.7618e-02`
+
+with a very small collapse score
+
+- `S(beta) = 8.3268e-05`
+
+and the collapsed global fit gives
+
+- `t_c = 2.9846`
+- `r = 4.1519`
+- relative RMSE `1.6245e-02`
+
+Important caveat:
+
+- although the best-fit `beta` is close to zero, the one-curve collapsed fit is still worse than fitting the `H_*` slices independently (`delta AIC = -799.13`, `delta BIC = -757.67` in favor of the separate fits)
+
+So a pure `x=t_p H_*^\beta` collapse is not enough by itself.
+
+For the restricted lattice comparison `H_* = 1.5, 2.0`, the collapse quality depends strongly on wall velocity:
+
+- `v_w = 0.3`: `beta = 4.8064e-01`, relative RMSE `1.8155e-02`
+- `v_w = 0.5`: `beta = 3.2874e-01`, relative RMSE `8.9520e-03`
+- `v_w = 0.7`: `beta = 1.4331e-01`, relative RMSE `6.1755e-03`
+- `v_w = 0.9`: `beta = -2.4345e-03`, relative RMSE `4.2390e-03`
+
+Conclusion from the collapse scan:
+
+- as `v_w` increases, the best collapse exponent moves steadily toward `beta = 0`
+- `v_w = 0.9` is clearly the cleanest lattice dataset for testing residual `H_*` dependence
+
+Using that same collapse exponent as input, I next fit a scalar amplitude law
+
+\[
+f_{\rm anhr}(\theta_0,t_p,H_*) = H_*^\gamma\,f_{\rm univ}(\theta_0,x)
+\]
+
+with `\gamma` taken to be a single global scalar.
+
+For the full `v9` dataset across `H_* = 0.5, 1.0, 1.5, 2.0`, the pooled amplitude estimate is
+
+- `gamma_{\rm pooled} = -1.1735e-01`
+
+with 95% CI
+
+- `[-1.2113e-01,\,-1.1357e-01]`
+
+and the scalar-`\gamma` nonlinear fit gives
+
+- `gamma = -1.4522e-01`
+- `t_c = 4.5643`
+- `r = 3.4191`
+- relative RMSE `1.9958e-02`
+
+On the restricted lattice-only `H_* = 1.5, 2.0` `v9` subset, the scalar-`\gamma` fit is much cleaner:
+
+- `gamma_{\rm pooled} = -1.1491e-01`
+- scalar-fit `gamma = -1.1923e-01`
+- `t_c = 1.3839`
+- `r = 9.4498`
+- relative RMSE `4.9204e-03`
+
+and it is strongly preferred over the no-`\gamma` collapsed model:
+
+- `delta AIC = -735.55`
+- `delta BIC = -735.55`
+
+Finally, repeating the scalar-`\gamma` fit for all four wall velocities shows:
+
+- `v_w = 0.3`: `gamma = -1.6117e-02`, `t_c = 3.5663`, `r = 17.91`, relative RMSE `3.9515e-02`
+- `v_w = 0.5`: `gamma = -2.1436e-02`, `t_c = 19.96`, `r = 20.00`, relative RMSE `1.8097e-02`
+- `v_w = 0.7`: `gamma = -1.1090e-01`, `t_c = 15.90`, `r = 16.90`, relative RMSE `1.1125e-02`
+- `v_w = 0.9`: `gamma = -1.1923e-01`, `t_c = 1.3839`, `r = 9.4498`, relative RMSE `4.9204e-03`
+
+Interpretation:
+
+- only the high-`v_w` runs, especially `v9`, give a clean and stable negative scalar `\gamma`
+- for `v3` and `v5`, the fit compensates by pushing `r` and `t_c` to extreme values, so those scalar-`\gamma` results are not yet trustworthy
+- the current best lattice-facing `H_*` extension is therefore: use `v_w = 0.9`, keep the fixed no-PT law, and include a negative scalar amplitude exponent `\gamma \simeq -0.12`
+
 ## Current Best Compact Description
 
 The best compact physical model currently is:
@@ -380,6 +477,7 @@ Conclusion:
 - if the goal is the best slice benchmark, use `pendulum_log + c0(t_p)`
 - if the goal is the best compact global formula, use the 7-parameter `c0 + c1 / t_p^p` model
 - if the goal is the current best lattice working fit, use fixed `v_w=0.9`, fixed `q=3/2`, and the fixed no-PT hilltop-log law from section 11
+- if the goal is the current best lattice `H_*` extension, use the `v_w=0.9` collapsed-coordinate fit with a scalar negative amplitude exponent `\gamma \simeq -0.12`
 
 ## Useful Files
 
@@ -395,6 +493,10 @@ Core scripts:
 - `ode/analysis/analyze_lattice_nopt_rho.py`
 - `ode/analysis/fit_xi_lattice_crossover_shape.py`
 - `ode/analysis/fit_lattice_shared_transition_variable.py`
+- `collapse_and_fit_fanh.py`
+- `measure_gamma_and_refit.py`
+- `compare_vw_collapse_results.py`
+- `compare_vw_gamma_results.py`
 
 Core outputs:
 
@@ -417,6 +519,18 @@ Core outputs:
 - `ode/analysis/results/lattice_fit/crossover_shape_v9_fixed_nopt_hilltoplog/fit_xi_lattice_crossover_shape_H1p5.png`
 - `ode/analysis/results/lattice_fit/crossover_shape_v9_fixed_nopt_hilltoplog/fit_xi_lattice_crossover_shape_H2p0.png`
 - `ode/analysis/results/lattice_fit/shared_transition_variable_v9_fixed_nopt_hilltoplog/fit_lattice_shared_transition_variable_summary.txt`
+- `results_collapse/final_summary.json`
+- `results_collapse/best_beta_plot.png`
+- `results_collapse/collapse_overlay.png`
+- `results_collapse_vw_compare/vw_collapse_summary.csv`
+- `results_collapse_vw_compare/vw_collapse_comparison.png`
+- `results_gamma/final_summary.json`
+- `results_gamma/gamma_vs_theta.png`
+- `results_gamma/collapse_overlay_with_gamma.png`
+- `results_gamma_v9_H15H20_scalar/final_summary.json`
+- `results_gamma_v9_H15H20_scalar/collapse_overlay_with_gamma.png`
+- `results_gamma_vw_compare/vw_gamma_summary.csv`
+- `results_gamma_vw_compare/vw_gamma_comparison.png`
 
 Old model-attempt outputs now live in:
 
@@ -443,5 +557,6 @@ Old model-attempt outputs now live in:
 If we want a better semi-analytic closure, the next target is now split by use case:
 
 1. for the ODE `H_* = 1` compact description, keep the 7-parameter `c0 + c1/t_p^p` model as the repo default unless a cleaner derivation appears
-2. for the lattice comparison, keep `v_w = 0.9`, `q = 3/2`, and the fixed no-PT hilltop-log law, and focus on the remaining PT-sector transition mismatch at larger `\theta_0`
-3. test whether the residual `H_* = 2.0` tension is coming from explicit `H_*` dependence in `f_{\rm anh}^{\infty}` / the PT plateau sector or from the `\beta/H_* \to t_p` mapping, rather than from the no-PT law
+2. for the lattice comparison, keep `v_w = 0.9`, the fixed no-PT hilltop-log law, and treat the scalar negative amplitude exponent `\gamma \simeq -0.12` as the current best empirical `H_*` correction
+3. test whether that scalar `\gamma` is a real physical `H_*` amplitude dependence or is instead absorbing a remaining transition-shape mismatch in the PT sector
+4. keep the lower-`v_w` scalar-`\gamma` results as provisional only, because those fits still run to extreme `t_c`/`r` values and are not yet stable

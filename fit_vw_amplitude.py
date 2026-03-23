@@ -1,0 +1,976 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import re
+import sys
+import traceback
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from joblib import Parallel, delayed
+from scipy.optimize import least_squares
+
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from ode.hom_ODE.percolation import PercolationCache
+
+
+RHO_CANDIDATES = [
+    ROOT / "rho_noPT_data.txt",
+    ROOT / "lattice_data/data/rho_noPT_data.txt",
+    ROOT / "lattice_data/rho_noPT_data.txt",
+]
+RAW_VW_GLOB_CANDIDATES = [
+    ROOT / "lattice_data/data/energy_ratio_by_theta_data_v*.txt",
+    ROOT / "energy_ratio_by_theta_data_v*.txt",
+]
+DEFAULT_VW_TAGS = ["v3", "v5", "v7", "v9"]
+DEFAULT_H_VALUES = [1.5, 2.0]
+
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="Fit a universal fanh(tp, theta) shape with a v_w-dependent amplitude."
+    )
+    p.add_argument("--rho", type=str, default="")
+    p.add_argument("--vw-folders", nargs="*", default=None)
+    p.add_argument("--h-values", type=float, nargs="+", default=DEFAULT_H_VALUES)
+    p.add_argument("--tp-min", type=float, default=None)
+    p.add_argument("--tp-max", type=float, default=None)
+    p.add_argument("--bootstrap", type=int, default=200)
+    p.add_argument("--n-jobs", type=int, default=-1)
+    p.add_argument("--reg-Finf", type=float, default=0.0)
+    p.add_argument("--tc0", type=float, default=1.5)
+    p.add_argument("--fix-tc", dest="fix_tc", action="store_true")
+    p.add_argument("--free-tc", dest="fix_tc", action="store_false")
+    p.add_argument("--dpi", type=int, default=220)
+    p.add_argument("--outdir", type=str, default="results_vw_amp")
+    p.set_defaults(fix_tc=True)
+    return p.parse_args()
+
+
+def to_native(obj):
+    if isinstance(obj, dict):
+        return {str(k): to_native(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [to_native(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return [to_native(v) for v in obj.tolist()]
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    return obj
+
+
+def save_json(path: Path, payload):
+    path.write_text(json.dumps(to_native(payload), indent=2, sort_keys=True))
+
+
+def error_exit(outdir: Path, message: str, trace: str = ""):
+    outdir.mkdir(parents=True, exist_ok=True)
+    payload = {"status": "error", "message": message}
+    if trace:
+        payload["traceback"] = trace
+    save_json(outdir / "_error.json", payload)
+    print(json.dumps(payload, sort_keys=True))
+    return 1
+
+
+def rel_rmse(y, yfit):
+    y = np.asarray(y, dtype=np.float64)
+    yfit = np.asarray(yfit, dtype=np.float64)
+    return float(np.sqrt(np.mean(np.square((yfit - y) / np.maximum(y, 1.0e-12)))))
+
+
+def potential(theta):
+    theta = np.asarray(theta, dtype=np.float64)
+    return 1.0 - np.cos(theta)
+
+
+def nearest_theta(theta_values, theta0, atol=5.0e-4):
+    theta_values = np.asarray(theta_values, dtype=np.float64)
+    idx = int(np.argmin(np.abs(theta_values - float(theta0))))
+    if abs(theta_values[idx] - float(theta0)) > atol:
+        raise RuntimeError(f"No theta match for theta={theta0:.10f}")
+    return idx
+
+
+def resolve_rho_file(user_value: str = "") -> Path:
+    if user_value:
+        path = Path(user_value).resolve()
+        if path.exists():
+            return path
+        raise FileNotFoundError(f"Missing requested rho_noPT file: {path}")
+    for candidate in RHO_CANDIDATES:
+        if candidate.exists():
+            return candidate.resolve()
+    raise FileNotFoundError(
+        "Missing rho_noPT_data.txt. Supply it with --rho or place it in lattice_data/data/."
+    )
+
+
+def parse_vw_from_name(name: str) -> float:
+    m = re.search(r"v(\d+(?:p\d+)?)", name)
+    if not m:
+        raise ValueError(f"Could not infer v_w from name: {name}")
+    token = m.group(1).replace("p", ".")
+    if "." in token:
+        return float(token)
+    return float(f"0.{token}")
+
+
+def autodiscover_vw_sources():
+    found = {}
+    for pattern in RAW_VW_GLOB_CANDIDATES:
+        for path in sorted(ROOT.glob(str(Path(pattern).relative_to(ROOT)))):
+            try:
+                vw = parse_vw_from_name(path.stem)
+            except ValueError:
+                continue
+            found[f"v{int(round(vw * 10))}"] = path.resolve()
+    return found
+
+
+def resolve_vw_sources(tokens):
+    discovered = autodiscover_vw_sources()
+    if not tokens:
+        tokens = [tag for tag in DEFAULT_VW_TAGS if tag in discovered]
+    if not tokens:
+        raise FileNotFoundError(
+            "No lattice v_w inputs found. Supply --vw-folders v3 v5 v7 v9 or place raw files under lattice_data/data/."
+        )
+
+    resolved = []
+    for token in tokens:
+        p = Path(token)
+        if p.exists():
+            path = p.resolve()
+            if path.is_dir():
+                raw = sorted(path.glob("energy_ratio_by_theta_data_v*.txt"))
+                if raw:
+                    resolved.append((parse_vw_from_name(raw[0].stem), raw[0].resolve(), path.name))
+                    continue
+                raise RuntimeError(f"Folder {path} does not contain a supported raw lattice file.")
+            resolved.append((parse_vw_from_name(path.stem), path, path.stem))
+            continue
+
+        if token in discovered:
+            resolved.append((parse_vw_from_name(token), discovered[token], token))
+            continue
+
+        candidate = ROOT / "lattice_data" / "data" / f"energy_ratio_by_theta_data_{token}.txt"
+        if candidate.exists():
+            resolved.append((parse_vw_from_name(token), candidate.resolve(), token))
+            continue
+
+        raise FileNotFoundError(
+            f"Could not resolve {token}. Expected a raw file like lattice_data/data/energy_ratio_by_theta_data_{token}.txt."
+        )
+
+    resolved = sorted(resolved, key=lambda item: item[0])
+    return resolved
+
+
+def load_f0_table(path: Path, target_h):
+    df = pd.read_csv(path, sep=r"\s+", comment="#")
+    cols = {c.lower(): c for c in df.columns}
+    if {"theta", "f0"} <= set(cols):
+        out = df.rename(columns={cols["theta"]: "theta", cols["f0"]: "F0"})[["theta", "F0"]].copy()
+        return out.sort_values("theta").reset_index(drop=True)
+
+    theta_col = cols.get("theta0", cols.get("theta"))
+    h_col = cols.get("h_pt", cols.get("hstar", cols.get("h")))
+    rho_col = cols.get("rho")
+    if theta_col is None or h_col is None or rho_col is None:
+        raise RuntimeError(
+            f"rho_noPT_data.txt must contain either [theta, F0] or [theta0/theta, H_PT/Hstar/H, rho]. Found {list(df.columns)}"
+        )
+
+    work = pd.DataFrame(
+        {
+            "theta": df[theta_col].astype(float),
+            "H": df[h_col].astype(float),
+            "rho": df[rho_col].astype(float),
+        }
+    )
+    work = work[np.isfinite(work["theta"]) & np.isfinite(work["H"]) & np.isfinite(work["rho"])].copy()
+    use = work[work["H"].isin(target_h)].copy()
+    if use.empty:
+        use = work.copy()
+    use["F0_raw"] = use["rho"] / np.maximum(
+        potential(use["theta"].to_numpy()) * np.power(use["H"].to_numpy(), 1.5),
+        1.0e-18,
+    )
+    out = use.groupby("theta", as_index=False)["F0_raw"].median().rename(columns={"F0_raw": "F0"})
+    return out.sort_values("theta").reset_index(drop=True)
+
+
+def load_one_raw_scan(path: Path, vw: float, target_h, perc: PercolationCache):
+    df = pd.read_csv(path, sep=r"\s+", comment="#")
+    cols = {c.lower(): c for c in df.columns}
+    theta_col = cols.get("theta0", cols.get("theta"))
+    h_col = cols.get("h_pt", cols.get("hstar", cols.get("h")))
+    beta_over_h_col = cols.get("beta_over_h")
+    xi_col = cols.get("mean_ratio", cols.get("xi"))
+    if theta_col is None or h_col is None or beta_over_h_col is None or xi_col is None:
+        raw = pd.read_csv(path, sep=r"\s+", comment="#", header=None)
+        if raw.shape[1] < 7:
+            raise RuntimeError(
+                f"Raw lattice file {path} must contain [theta, H, beta_over_H, beta, mean_ratio, std_ratio, N_samples]."
+            )
+        raw = raw.iloc[:, :7].copy()
+        raw.columns = ["theta", "H", "beta_over_H", "beta", "xi", "std_ratio", "N_samples"]
+        df = raw
+        cols = {c.lower(): c for c in df.columns}
+        theta_col = "theta"
+        h_col = "H"
+        beta_over_h_col = "beta_over_H"
+        xi_col = "xi"
+
+    work = pd.DataFrame(
+        {
+            "theta": df[theta_col].astype(float),
+            "H": df[h_col].astype(float),
+            "beta_over_H": df[beta_over_h_col].astype(float),
+            "xi": df[xi_col].astype(float),
+        }
+    )
+    sem_col = cols.get("std_ratio")
+    n_col = cols.get("n_samples")
+    if sem_col is not None and n_col is not None:
+        work["xi_sem"] = df[sem_col].astype(float) / np.sqrt(np.maximum(df[n_col].astype(float), 1.0))
+    else:
+        work["xi_sem"] = np.nan
+
+    work = work[
+        np.isfinite(work["theta"])
+        & np.isfinite(work["H"])
+        & np.isfinite(work["beta_over_H"])
+        & np.isfinite(work["xi"])
+    ].copy()
+    work = work[work["H"].isin(target_h)].copy()
+    if work.empty:
+        raise RuntimeError(f"No target H values {target_h} found in {path}")
+
+    work["tp"] = [
+        perc.get(float(h), float(beta_over_h), float(vw))
+        for h, beta_over_h in zip(work["H"], work["beta_over_H"])
+    ]
+    work["v_w"] = float(vw)
+    work["source_file"] = path.name
+    work = work[
+        np.isfinite(work["tp"]) & (work["tp"] > 0.0) & np.isfinite(work["xi"]) & (work["xi"] > 0.0)
+    ].copy()
+    return work.sort_values(["H", "theta", "tp"]).reset_index(drop=True)
+
+
+def merge_f0(df: pd.DataFrame, f0_table: pd.DataFrame):
+    theta_ref = f0_table["theta"].to_numpy(dtype=np.float64)
+    f0_ref = f0_table["F0"].to_numpy(dtype=np.float64)
+    out = df.copy()
+    idx = [nearest_theta(theta_ref, th) for th in out["theta"].to_numpy(dtype=np.float64)]
+    out["theta"] = [float(theta_ref[i]) for i in idx]
+    out["F0"] = [float(f0_ref[i]) for i in idx]
+    out["fanh"] = out["xi"] * out["F0"] / np.power(out["tp"], 1.5)
+    return out
+
+
+def prepare_dataframe(args, outdir: Path):
+    rho_path = resolve_rho_file(args.rho)
+    vw_sources = resolve_vw_sources(args.vw_folders)
+    f0_table = load_f0_table(rho_path, args.h_values)
+    f0_table.to_csv(outdir / "f0_table.csv", index=False)
+
+    perc = PercolationCache()
+    frames = []
+    for vw, path, tag in vw_sources:
+        print(f"[load] {tag} -> v_w={vw:.3f} from {path.relative_to(ROOT)}")
+        frames.append(load_one_raw_scan(path, vw, args.h_values, perc))
+    df = pd.concat(frames, ignore_index=True)
+    df = merge_f0(df, f0_table)
+
+    if args.tp_min is not None:
+        df = df[df["tp"] >= float(args.tp_min)].copy()
+    if args.tp_max is not None:
+        df = df[df["tp"] <= float(args.tp_max)].copy()
+
+    df = df[
+        np.isfinite(df["theta"])
+        & np.isfinite(df["tp"])
+        & np.isfinite(df["xi"])
+        & np.isfinite(df["F0"])
+        & np.isfinite(df["v_w"])
+    ].copy()
+    df = df[(df["tp"] > 0.0) & (df["xi"] > 0.0) & (df["F0"] > 0.0)].copy()
+    if df.empty:
+        raise RuntimeError("No valid lattice points remained after filtering.")
+
+    theta_values = np.sort(df["theta"].unique())
+    theta_index = {float(th): i for i, th in enumerate(theta_values)}
+    df["theta_idx"] = [theta_index[float(th)] for th in df["theta"]]
+    return df.sort_values(["v_w", "H", "theta", "tp"]).reset_index(drop=True), f0_table, theta_values
+
+
+def estimate_finf_init(df: pd.DataFrame, theta_values):
+    finf = np.zeros(len(theta_values), dtype=np.float64)
+    for i, theta in enumerate(theta_values):
+        sub = df[df["theta"] == theta].sort_values("tp").copy()
+        n_tail = max(5, int(math.ceil(0.10 * len(sub))))
+        tail = sub.tail(n_tail).copy()
+        values = tail["xi"].to_numpy(dtype=np.float64) / np.maximum(np.power(tail["tp"].to_numpy(dtype=np.float64), 1.5), 1.0e-18)
+        finf[i] = max(float(np.median(values) * (sub["F0"].iloc[0] ** 2)), 1.0e-6)
+    return finf
+
+
+def amplitude_factor(vw_arr, option, amp_params):
+    vw_arr = np.asarray(vw_arr, dtype=np.float64)
+    if option == "baseline":
+        return np.ones_like(vw_arr)
+    if option == "A":
+        alpha = float(amp_params["alpha"])
+        return np.power(vw_arr, alpha)
+    if option == "B":
+        alpha = float(amp_params["alpha"])
+        a0 = float(amp_params["A0"])
+        a1 = float(amp_params["A1"])
+        return a0 + a1 * np.power(vw_arr, alpha)
+    raise ValueError(f"Unknown option {option}")
+
+
+def unpack_params(params, option, n_theta, fix_tc, tc_fixed):
+    idx = 0
+    if fix_tc:
+        tc = float(tc_fixed)
+    else:
+        tc = float(params[idx])
+        idx += 1
+    r = float(params[idx])
+    idx += 1
+
+    amp = {}
+    if option == "A":
+        amp["alpha"] = float(params[idx])
+        idx += 1
+    elif option == "B":
+        amp["A0"] = float(params[idx])
+        amp["A1"] = float(params[idx + 1])
+        amp["alpha"] = float(params[idx + 2])
+        idx += 3
+
+    finf = np.asarray(params[idx : idx + n_theta], dtype=np.float64)
+    return tc, r, amp, finf
+
+
+def build_param_vector(option, fix_tc, tc0, r0, amp0, finf0):
+    parts = []
+    lower = []
+    upper = []
+
+    if not fix_tc:
+        parts.append(float(tc0))
+        lower.append(0.1)
+        upper.append(20.0)
+
+    parts.append(float(r0))
+    lower.append(0.1)
+    upper.append(50.0)
+
+    if option == "A":
+        parts.append(float(amp0.get("alpha", -0.12)))
+        lower.append(-3.0)
+        upper.append(3.0)
+    elif option == "B":
+        parts.extend(
+            [
+                float(amp0.get("A0", 0.0)),
+                float(amp0.get("A1", 1.0)),
+                float(amp0.get("alpha", -0.12)),
+            ]
+        )
+        lower.extend([0.0, 0.0, -3.0])
+        upper.extend([10.0, 10.0, 3.0])
+
+    finf0 = np.asarray(finf0, dtype=np.float64)
+    parts.extend(finf0.tolist())
+    lower.extend([1.0e-8] * len(finf0))
+    upper.extend([1.0e3] * len(finf0))
+    return np.asarray(parts, dtype=np.float64), np.asarray(lower, dtype=np.float64), np.asarray(upper, dtype=np.float64)
+
+
+def model_xi(params, meta, option, fix_tc, tc_fixed):
+    tc, r, amp_params, finf = unpack_params(params, option, meta["n_theta"], fix_tc, tc_fixed)
+    base = np.power(meta["tp"], 1.5) * finf[meta["theta_idx"]] / meta["F0_sq"]
+    transient = 1.0 / (1.0 + np.power(meta["tp"] / max(tc, 1.0e-12), r))
+    amp = amplitude_factor(meta["v_w"], option, amp_params)
+    return amp * (base + transient)
+
+
+def model_fanh(params, meta, option, fix_tc, tc_fixed, tp_grid, theta_index, f0_value, vw_value):
+    tc, r, amp_params, finf = unpack_params(params, option, meta["n_theta"], fix_tc, tc_fixed)
+    amp = float(amplitude_factor(np.asarray([vw_value]), option, amp_params)[0])
+    finf_theta = float(finf[theta_index])
+    univ = finf_theta / f0_value + f0_value / (
+        np.power(tp_grid, 1.5) * (1.0 + np.power(tp_grid / max(tc, 1.0e-12), r))
+    )
+    return amp * univ
+
+
+def residual_vector(params, meta, option, fix_tc, tc_fixed, reg_finf, finf_ref):
+    y_model = model_xi(params, meta, option, fix_tc, tc_fixed)
+    resid = (y_model - meta["xi"]) / np.maximum(meta["xi"], 1.0e-12)
+    if reg_finf > 0.0:
+        _, _, _, finf = unpack_params(params, option, meta["n_theta"], fix_tc, tc_fixed)
+        scale = np.maximum(finf_ref, 1.0e-6)
+        reg = math.sqrt(reg_finf) * (finf - finf_ref) / scale
+        resid = np.concatenate([resid, reg])
+    return resid
+
+
+def approx_covariance(result):
+    try:
+        jac = np.asarray(result.jac, dtype=np.float64)
+        if jac.ndim != 2 or jac.shape[0] <= jac.shape[1]:
+            return None
+        jt_j = jac.T @ jac
+        dof = max(jac.shape[0] - jac.shape[1], 1)
+        rss = float(np.sum(np.square(result.fun)))
+        sigma2 = rss / dof
+        cov = np.linalg.pinv(jt_j) * sigma2
+        return cov
+    except Exception:
+        return None
+
+
+def aic_bic(resid, k):
+    resid = np.asarray(resid, dtype=np.float64)
+    n = max(int(resid.size), 1)
+    rss = max(float(np.sum(np.square(resid))), 1.0e-18)
+    aic = n * math.log(rss / n) + 2.0 * k
+    bic = n * math.log(rss / n) + k * math.log(n)
+    return aic, bic
+
+
+def fit_model(option, df, theta_values, fix_tc, tc_fixed, reg_finf, init_from=None):
+    meta = {
+        "xi": df["xi"].to_numpy(dtype=np.float64),
+        "tp": df["tp"].to_numpy(dtype=np.float64),
+        "F0_sq": np.square(df["F0"].to_numpy(dtype=np.float64)),
+        "theta_idx": df["theta_idx"].to_numpy(dtype=np.int64),
+        "v_w": df["v_w"].to_numpy(dtype=np.float64),
+        "n_theta": len(theta_values),
+    }
+    finf0 = estimate_finf_init(df, theta_values)
+
+    if init_from is None:
+        tc0 = tc_fixed
+        r0 = 5.0
+        amp0 = {"alpha": -0.12, "A0": 0.0, "A1": 1.0}
+    else:
+        tc0 = init_from["t_c"]
+        r0 = init_from["r"]
+        amp0 = {
+            "alpha": init_from.get("alpha", -0.12),
+            "A0": init_from.get("A0", 0.0),
+            "A1": init_from.get("A1", 1.0),
+        }
+        finf0 = np.asarray(init_from["F_inf"], dtype=np.float64)
+
+    x0, lower, upper = build_param_vector(option, fix_tc, tc0, r0, amp0, finf0)
+    fun = lambda p: residual_vector(p, meta, option, fix_tc, tc_fixed, reg_finf, finf0)
+
+    huber = least_squares(fun, x0, bounds=(lower, upper), loss="huber", f_scale=0.05, max_nfev=20000)
+    final = least_squares(fun, huber.x, bounds=(lower, upper), loss="linear", max_nfev=20000)
+
+    y_model = model_xi(final.x, meta, option, fix_tc, tc_fixed)
+    resid = (y_model - meta["xi"]) / np.maximum(meta["xi"], 1.0e-12)
+    tc, r, amp_params, finf = unpack_params(final.x, option, len(theta_values), fix_tc, tc_fixed)
+    cov = approx_covariance(final)
+    errs = None if cov is None else np.sqrt(np.maximum(np.diag(cov), 0.0))
+    aic, bic = aic_bic(resid, len(final.x))
+
+    payload = {
+        "option": option,
+        "success": bool(final.success),
+        "message": str(final.message),
+        "n_points": int(len(df)),
+        "n_params": int(len(final.x)),
+        "dof": int(len(df) - len(final.x)),
+        "t_c": float(tc),
+        "r": float(r),
+        "rel_rmse": rel_rmse(meta["xi"], y_model),
+        "AIC": float(aic),
+        "BIC": float(bic),
+        "F_inf": {f"{theta:.10f}": float(val) for theta, val in zip(theta_values, finf)},
+        "theta_values": [float(v) for v in theta_values],
+    }
+    payload.update(amp_params)
+    if errs is not None:
+        err_payload = {}
+        idx = 0
+        if not fix_tc:
+            err_payload["t_c_err"] = float(errs[idx])
+            idx += 1
+        err_payload["r_err"] = float(errs[idx])
+        idx += 1
+        if option == "A":
+            err_payload["alpha_err"] = float(errs[idx])
+            idx += 1
+        elif option == "B":
+            err_payload["A0_err"] = float(errs[idx])
+            err_payload["A1_err"] = float(errs[idx + 1])
+            err_payload["alpha_err"] = float(errs[idx + 2])
+        payload["approx_errors"] = err_payload
+        payload["covariance"] = cov.tolist()
+    return {
+        "result": final,
+        "payload": payload,
+        "meta": meta,
+        "y_model": y_model,
+        "resid": resid,
+        "theta_values": theta_values,
+    }
+
+
+def build_init_from_fit(fit_payload):
+    init = {
+        "t_c": fit_payload["t_c"],
+        "r": fit_payload["r"],
+        "F_inf": [fit_payload["F_inf"][f"{theta:.10f}"] for theta in fit_payload["theta_values"]],
+    }
+    if "alpha" in fit_payload:
+        init["alpha"] = fit_payload["alpha"]
+    if "A0" in fit_payload:
+        init["A0"] = fit_payload["A0"]
+    if "A1" in fit_payload:
+        init["A1"] = fit_payload["A1"]
+    return init
+
+
+def summarize_bootstrap(samples, option, theta_values, fix_tc, tc_fixed):
+    if not samples:
+        return {"status": "no_successful_bootstrap_samples"}
+    arr = np.asarray(samples, dtype=np.float64)
+    idx = 0
+    out = {
+        "n_samples": int(arr.shape[0]),
+        "option": option,
+    }
+    if not fix_tc:
+        vals = arr[:, idx]
+        out["t_c"] = {"p16": float(np.nanpercentile(vals, 16)), "p50": float(np.nanpercentile(vals, 50)), "p84": float(np.nanpercentile(vals, 84))}
+        idx += 1
+    else:
+        out["t_c"] = {"fixed": float(tc_fixed)}
+
+    vals = arr[:, idx]
+    out["r"] = {"p16": float(np.nanpercentile(vals, 16)), "p50": float(np.nanpercentile(vals, 50)), "p84": float(np.nanpercentile(vals, 84))}
+    idx += 1
+
+    if option == "A":
+        vals = arr[:, idx]
+        out["alpha"] = {"p16": float(np.nanpercentile(vals, 16)), "p50": float(np.nanpercentile(vals, 50)), "p84": float(np.nanpercentile(vals, 84))}
+        idx += 1
+    elif option == "B":
+        for key in ["A0", "A1", "alpha"]:
+            vals = arr[:, idx]
+            out[key] = {"p16": float(np.nanpercentile(vals, 16)), "p50": float(np.nanpercentile(vals, 50)), "p84": float(np.nanpercentile(vals, 84))}
+            idx += 1
+
+    finf = {}
+    for theta in theta_values:
+        vals = arr[:, idx]
+        finf[f"{theta:.10f}"] = {
+            "p16": float(np.nanpercentile(vals, 16)),
+            "p50": float(np.nanpercentile(vals, 50)),
+            "p84": float(np.nanpercentile(vals, 84)),
+        }
+        idx += 1
+    out["F_inf"] = finf
+    return out
+
+
+def bootstrap_fit(df, fit_bundle, option, args, theta_values):
+    result = fit_bundle["result"]
+    payload = fit_bundle["payload"]
+    meta = fit_bundle["meta"]
+    y_fit = fit_bundle["y_model"]
+    frac_resid = fit_bundle["resid"]
+    finf_ref = np.asarray([payload["F_inf"][f"{theta:.10f}"] for theta in theta_values], dtype=np.float64)
+    x_best = np.asarray(result.x, dtype=np.float64)
+    lower, upper = build_param_vector(
+        option,
+        args.fix_tc,
+        payload["t_c"],
+        payload["r"],
+        {k: payload[k] for k in ["alpha", "A0", "A1"] if k in payload},
+        finf_ref,
+    )[1:]
+
+    def one_boot(seed):
+        rng = np.random.default_rng(seed)
+        sampled = rng.choice(frac_resid, size=len(frac_resid), replace=True)
+        denom = np.maximum(1.0 + sampled, 0.05)
+        xi_boot = y_fit / denom
+        boot_meta = dict(meta)
+        boot_meta["xi"] = xi_boot
+        fun = lambda p: residual_vector(p, boot_meta, option, args.fix_tc, args.tc0, args.reg_Finf, finf_ref)
+        try:
+            huber = least_squares(fun, x_best, bounds=(lower, upper), loss="huber", f_scale=0.05, max_nfev=15000)
+            final = least_squares(fun, huber.x, bounds=(lower, upper), loss="linear", max_nfev=15000)
+            if not final.success:
+                return None
+            return final.x
+        except Exception:
+            return None
+
+    seeds = np.arange(args.bootstrap, dtype=np.int64) + 12345
+    n_jobs = args.n_jobs
+    samples = Parallel(n_jobs=n_jobs)(delayed(one_boot)(int(seed)) for seed in seeds)
+    samples = [s for s in samples if s is not None]
+    return summarize_bootstrap(samples, option, theta_values, args.fix_tc, args.tc0), samples
+
+
+def observed_amplitude_by_vw(df, fit_bundle, option, fix_tc, tc_fixed):
+    meta = fit_bundle["meta"]
+    params = fit_bundle["result"].x
+    tc, r, amp_params, finf = unpack_params(params, option, meta["n_theta"], fix_tc, tc_fixed)
+    transient = 1.0 / (1.0 + np.power(meta["tp"] / max(tc, 1.0e-12), r))
+    base = np.power(meta["tp"], 1.5) * finf[meta["theta_idx"]] / meta["F0_sq"] + transient
+    rows = []
+    work = df.copy()
+    work["base"] = base
+    for vw, sub in work.groupby("v_w"):
+        y = sub["xi"].to_numpy(dtype=np.float64)
+        m = sub["base"].to_numpy(dtype=np.float64)
+        amp_hat = float(np.sum(y * m) / np.maximum(np.sum(m * m), 1.0e-18))
+        rows.append({"v_w": float(vw), "A_obs": amp_hat})
+    return pd.DataFrame(rows).sort_values("v_w").reset_index(drop=True)
+
+
+def representative_thetas(theta_values, n=6):
+    theta_values = np.asarray(theta_values, dtype=np.float64)
+    if len(theta_values) <= n:
+        return theta_values
+    idx = np.linspace(0, len(theta_values) - 1, n).round().astype(int)
+    return theta_values[np.unique(idx)]
+
+
+def plot_fanh_panels(df, theta_values, best_fit, option, fix_tc, tc_fixed, outpath: Path, dpi: int):
+    reps = representative_thetas(theta_values, n=6)
+    fig, axes = plt.subplots(2, len(reps), figsize=(3.2 * len(reps), 7.0), sharex="col")
+    if len(reps) == 1:
+        axes = np.asarray(axes).reshape(2, 1)
+    cmap = plt.get_cmap("viridis")
+    vw_values = np.sort(df["v_w"].unique())
+    colors = {vw: cmap(i / max(len(vw_values) - 1, 1)) for i, vw in enumerate(vw_values)}
+    marker_map = {1.5: "o", 2.0: "s"}
+
+    meta = best_fit["meta"]
+    _, _, amp_params, _ = unpack_params(best_fit["result"].x, option, meta["n_theta"], fix_tc, tc_fixed)
+    amp_curve = lambda vw: float(amplitude_factor(np.asarray([vw]), option, amp_params)[0])
+
+    theta_to_idx = {float(th): i for i, th in enumerate(theta_values)}
+    for col, theta in enumerate(reps):
+        sub = df[df["theta"] == theta].copy()
+        f0 = float(sub["F0"].iloc[0])
+        theta_idx = theta_to_idx[float(theta)]
+        tp_grid = np.geomspace(sub["tp"].min() * 0.95, sub["tp"].max() * 1.05, 250)
+
+        ax_raw = axes[0, col]
+        ax_adj = axes[1, col]
+        for vw in vw_values:
+            vw_sub = sub[sub["v_w"] == vw].copy()
+            if vw_sub.empty:
+                continue
+            for h, hh in vw_sub.groupby("H"):
+                ax_raw.scatter(hh["tp"], hh["fanh"], s=20, alpha=0.75, color=colors[vw], marker=marker_map.get(float(h), "o"))
+                ax_adj.scatter(
+                    hh["tp"],
+                    hh["fanh"] / amp_curve(vw),
+                    s=20,
+                    alpha=0.75,
+                    color=colors[vw],
+                    marker=marker_map.get(float(h), "o"),
+                )
+
+            raw_curve = model_fanh(best_fit["result"].x, best_fit["meta"], option, fix_tc, tc_fixed, tp_grid, theta_idx, f0, float(vw))
+            ax_raw.plot(tp_grid, raw_curve, color=colors[vw], lw=1.8)
+
+        univ_curve = model_fanh(best_fit["result"].x, best_fit["meta"], option, fix_tc, tc_fixed, tp_grid, theta_idx, f0, 1.0)
+        ax_adj.plot(tp_grid, univ_curve, color="black", lw=2.0)
+
+        for ax in [ax_raw, ax_adj]:
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            ax.grid(alpha=0.25)
+            ax.set_title(rf"$\theta={theta:.3f}$")
+        ax_raw.set_ylabel(r"$f_{\rm anh}$")
+        ax_adj.set_ylabel(r"$f_{\rm anh}/\mathcal{A}(v_w)$")
+        ax_adj.set_xlabel(r"$t_p$")
+
+    handles = []
+    labels = []
+    for vw in vw_values:
+        handles.append(plt.Line2D([0], [0], color=colors[vw], marker="o", linestyle="-"))
+        labels.append(rf"$v_w={vw:.1f}$")
+    handles.append(plt.Line2D([0], [0], color="black", linestyle="-"))
+    labels.append("universal")
+    fig.legend(handles, labels, loc="upper center", ncol=min(len(labels), 5), frameon=False)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(outpath, dpi=dpi)
+    plt.close(fig)
+
+
+def plot_amplitude_vs_vw(df, fit_a, fit_b, fix_tc, tc_fixed, outpath: Path, dpi: int):
+    obs_a = observed_amplitude_by_vw(df, fit_a, "A", fix_tc, tc_fixed)
+    obs_b = observed_amplitude_by_vw(df, fit_b, "B", fix_tc, tc_fixed)
+    vw_grid = np.linspace(df["v_w"].min(), df["v_w"].max(), 300)
+    amp_a = amplitude_factor(vw_grid, "A", {"alpha": fit_a["payload"]["alpha"]})
+    amp_b = amplitude_factor(
+        vw_grid,
+        "B",
+        {"A0": fit_b["payload"]["A0"], "A1": fit_b["payload"]["A1"], "alpha": fit_b["payload"]["alpha"]},
+    )
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.8))
+    ax.scatter(obs_a["v_w"], obs_a["A_obs"], color="tab:blue", label="empirical A(vw) from option A", s=45)
+    ax.scatter(obs_b["v_w"], obs_b["A_obs"], color="tab:orange", label="empirical A(vw) from option B", s=45, marker="s")
+    ax.plot(vw_grid, amp_a, color="tab:blue", lw=2.0, label=r"fit $v_w^\alpha$")
+    ax.plot(vw_grid, amp_b, color="tab:orange", lw=2.0, label=r"fit $A_0 + A_1 v_w^\alpha$")
+    ax.axhline(1.0, color="black", lw=1.0, ls="--", alpha=0.6, label="baseline")
+    ax.set_xlabel(r"$v_w$")
+    ax.set_ylabel(r"$\mathcal{A}(v_w)$")
+    ax.grid(alpha=0.25)
+    ax.legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    fig.savefig(outpath, dpi=dpi)
+    plt.close(fig)
+
+
+def plot_residual_heatmap(df, fit_bundle, option, outpath: Path, dpi: int):
+    resid = fit_bundle["resid"]
+    work = df.copy()
+    work["resid"] = resid
+    theta_values = np.sort(work["theta"].unique())
+    tp_bins = np.geomspace(work["tp"].min(), work["tp"].max(), 26)
+    tp_centers = np.sqrt(tp_bins[:-1] * tp_bins[1:])
+    grid = np.full((len(theta_values), len(tp_centers)), np.nan, dtype=np.float64)
+
+    for i, theta in enumerate(theta_values):
+        sub = work[work["theta"] == theta].copy()
+        inds = np.digitize(sub["tp"], tp_bins) - 1
+        for j in range(len(tp_centers)):
+            vals = sub.loc[inds == j, "resid"].to_numpy(dtype=np.float64)
+            if len(vals):
+                grid[i, j] = float(np.mean(vals))
+
+    fig, ax = plt.subplots(figsize=(9.2, 4.8))
+    mesh = ax.pcolormesh(tp_bins, np.arange(len(theta_values) + 1), np.nan_to_num(grid, nan=0.0), cmap="coolwarm", shading="auto")
+    ax.set_xscale("log")
+    ax.set_yticks(np.arange(len(theta_values)) + 0.5)
+    ax.set_yticklabels([f"{theta:.3f}" for theta in theta_values])
+    ax.set_xlabel(r"$t_p$")
+    ax.set_ylabel(r"$\theta$")
+    ax.set_title("Mean fractional residual by theta/tp bin")
+    fig.colorbar(mesh, ax=ax, label=r"$(\xi_{\rm model}-\xi)/\xi$")
+    fig.tight_layout()
+    fig.savefig(outpath, dpi=dpi)
+    plt.close(fig)
+
+
+def plot_bootstrap_hist(boot, samples, option, theta_values, fix_tc, outpath: Path, dpi: int):
+    if boot.get("status") == "no_successful_bootstrap_samples":
+        fig, ax = plt.subplots(figsize=(6, 3))
+        ax.text(0.5, 0.5, "No successful bootstrap samples", ha="center", va="center")
+        ax.axis("off")
+        fig.savefig(outpath, dpi=dpi)
+        plt.close(fig)
+        return
+
+    arr = np.asarray(samples, dtype=np.float64)
+    idx = 0
+    param_series = []
+    if not fix_tc:
+        param_series.append(("t_c", arr[:, idx]))
+        idx += 1
+    if option == "A":
+        param_series.append(("alpha", arr[:, idx]))
+        idx += 1
+    else:
+        param_series.append(("A0", arr[:, idx]))
+        param_series.append(("A1", arr[:, idx + 1]))
+        param_series.append(("alpha", arr[:, idx + 2]))
+        idx += 3
+    param_series.append(("r", arr[:, idx]))
+    idx += 1
+
+    rep_thetas = representative_thetas(theta_values, n=min(3, len(theta_values)))
+    for theta in rep_thetas:
+        param_series.append((rf"$F_\infty({theta:.3f})$", arr[:, idx]))
+        idx += 1
+
+    n = len(param_series)
+    ncol = min(3, n)
+    nrow = int(math.ceil(n / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(4.0 * ncol, 2.8 * nrow))
+    axes = np.atleast_1d(axes).ravel()
+    for ax, (label, vals) in zip(axes, param_series):
+        vals = np.asarray(vals, dtype=np.float64)
+        vals = vals[np.isfinite(vals)]
+        if len(vals):
+            ax.hist(vals, bins=20, color="tab:blue", alpha=0.65)
+            ax.axvline(np.nanmedian(vals), color="black", lw=1.5)
+        ax.set_title(label)
+        ax.grid(alpha=0.2)
+    for ax in axes[n:]:
+        ax.axis("off")
+    fig.tight_layout()
+    fig.savefig(outpath, dpi=dpi)
+    plt.close(fig)
+
+
+def plot_model_comparison(comp_df: pd.DataFrame, outpath: Path, dpi: int):
+    fig, axes = plt.subplots(1, 3, figsize=(11.5, 3.8))
+    metrics = [("rel_rmse", "rel-RMSE"), ("AIC", "AIC"), ("BIC", "BIC")]
+    colors = ["tab:gray", "tab:blue", "tab:orange"]
+    for ax, (col, title) in zip(axes, metrics):
+        ax.bar(comp_df["model"], comp_df[col], color=colors[: len(comp_df)])
+        ax.set_title(title)
+        ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(outpath, dpi=dpi)
+    plt.close(fig)
+
+
+def package_fit_json(fit_bundle):
+    payload = dict(fit_bundle["payload"])
+    payload["status"] = "ok" if payload["success"] else "fit_failed"
+    return payload
+
+
+def compact_fit_summary(payload):
+    keep = {
+        "option": payload["option"],
+        "t_c": payload["t_c"],
+        "r": payload["r"],
+        "rel_rmse": payload["rel_rmse"],
+        "AIC": payload["AIC"],
+        "BIC": payload["BIC"],
+    }
+    for key in ["alpha", "A0", "A1"]:
+        if key in payload:
+            keep[key] = payload[key]
+    return keep
+
+
+def main():
+    args = parse_args()
+    outdir = (ROOT / args.outdir).resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    try:
+        df, f0_table, theta_values = prepare_dataframe(args, outdir)
+        print(f"[info] loaded {len(df)} points across v_w={sorted(df['v_w'].unique())} and H={sorted(df['H'].unique())}")
+
+        baseline = fit_model("baseline", df, theta_values, args.fix_tc, args.tc0, args.reg_Finf, init_from=None)
+        option_a = fit_model(
+            "A",
+            df,
+            theta_values,
+            args.fix_tc,
+            args.tc0,
+            args.reg_Finf,
+            init_from=build_init_from_fit(baseline["payload"]),
+        )
+        option_b = fit_model(
+            "B",
+            df,
+            theta_values,
+            args.fix_tc,
+            args.tc0,
+            args.reg_Finf,
+            init_from=build_init_from_fit(option_a["payload"]),
+        )
+
+        save_json(outdir / "global_fit_optionA.json", package_fit_json(option_a))
+        save_json(outdir / "global_fit_optionB.json", package_fit_json(option_b))
+
+        comp_df = pd.DataFrame(
+            [
+                {"model": "baseline", "rel_rmse": baseline["payload"]["rel_rmse"], "AIC": baseline["payload"]["AIC"], "BIC": baseline["payload"]["BIC"]},
+                {"model": "optionA", "rel_rmse": option_a["payload"]["rel_rmse"], "AIC": option_a["payload"]["AIC"], "BIC": option_a["payload"]["BIC"]},
+                {"model": "optionB", "rel_rmse": option_b["payload"]["rel_rmse"], "AIC": option_b["payload"]["AIC"], "BIC": option_b["payload"]["BIC"]},
+            ]
+        )
+        comp_df.to_json(outdir / "model_comparison.json", orient="records", indent=2)
+        chosen_model = str(comp_df.sort_values(["AIC", "rel_rmse"]).iloc[0]["model"])
+
+        print(f"[fit] baseline rel-RMSE={baseline['payload']['rel_rmse']:.4e}")
+        print(f"[fit] optionA rel-RMSE={option_a['payload']['rel_rmse']:.4e}")
+        print(f"[fit] optionB rel-RMSE={option_b['payload']['rel_rmse']:.4e}")
+
+        boot_a, boot_a_samples = bootstrap_fit(df, option_a, "A", args, theta_values)
+        boot_b, boot_b_samples = bootstrap_fit(df, option_b, "B", args, theta_values)
+        save_json(outdir / "bootstrap_optionA.json", boot_a)
+        save_json(outdir / "bootstrap_optionB.json", boot_b)
+
+        best_fit = {"baseline": baseline, "optionA": option_a, "optionB": option_b}[chosen_model]
+        best_boot = boot_a if chosen_model == "optionA" else boot_b if chosen_model == "optionB" else None
+        best_option = "A" if chosen_model == "optionA" else "B" if chosen_model == "optionB" else "baseline"
+
+        plot_fanh_panels(df, theta_values, best_fit, best_option, args.fix_tc, args.tc0, outdir / "fanh_vs_tp_by_theta_vw.png", args.dpi)
+        plot_amplitude_vs_vw(df, option_a, option_b, args.fix_tc, args.tc0, outdir / "amplitude_vs_vw.png", args.dpi)
+        plot_residual_heatmap(df, best_fit, best_option, outdir / "residual_heatmap.png", args.dpi)
+        if best_boot is not None:
+            boot_samples = boot_a_samples if chosen_model == "optionA" else boot_b_samples
+            plot_bootstrap_hist(best_boot, boot_samples, best_option, theta_values, args.fix_tc, outdir / "params_bootstrap_hist.png", args.dpi)
+        else:
+            plot_bootstrap_hist({"status": "no_successful_bootstrap_samples"}, [], "A", theta_values, args.fix_tc, outdir / "params_bootstrap_hist.png", args.dpi)
+        plot_model_comparison(comp_df, outdir / "model_comparison.png", args.dpi)
+
+        model_comp_payload = {
+            "baseline": package_fit_json(baseline),
+            "optionA": package_fit_json(option_a),
+            "optionB": package_fit_json(option_b),
+            "chosen_model": chosen_model,
+        }
+        save_json(outdir / "model_comparison.json", model_comp_payload)
+
+        summary = {
+            "status": "ok",
+            "chosen_option": chosen_model,
+            "fix_tc": bool(args.fix_tc),
+            "t_c_fixed_value": float(args.tc0) if args.fix_tc else None,
+            "n_points": int(len(df)),
+            "vw_values": [float(v) for v in sorted(df["v_w"].unique())],
+            "H_values": [float(v) for v in sorted(df["H"].unique())],
+            "model_comparison": {
+                row["model"]: {
+                    "rel_rmse": float(row["rel_rmse"]),
+                    "AIC": float(row["AIC"]),
+                    "BIC": float(row["BIC"]),
+                }
+                for row in comp_df.to_dict(orient="records")
+            },
+            "best_fit": compact_fit_summary(best_fit["payload"]),
+        }
+        if best_boot is not None:
+            summary["bootstrap_68"] = best_boot
+
+        save_json(outdir / "final_summary.json", summary)
+        print(json.dumps(to_native(summary), sort_keys=True))
+        return 0
+    except Exception as exc:
+        return error_exit(outdir, str(exc), traceback.format_exc())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

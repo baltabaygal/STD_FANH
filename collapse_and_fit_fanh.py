@@ -1,0 +1,939 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import sys
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from joblib import Parallel, delayed
+from scipy.interpolate import interp1d
+from scipy.optimize import least_squares, minimize_scalar
+from scipy.signal import savgol_filter
+
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from ode.hom_ODE.percolation import PercolationCache
+
+
+# Edit these if your local filenames differ.
+RHO_CANDIDATES = [
+    ROOT / "rho_noPT_data.txt",
+    ROOT / "lattice_data/data/rho_noPT_data.txt",
+    ROOT / "lattice_data/rho_noPT_data.txt",
+]
+LATTICE_RAW_CANDIDATES = [
+    ROOT / "energy_ratio_by_theta_data_v9.txt",
+    ROOT / "lattice_data/data/energy_ratio_by_theta_data_v9.txt",
+]
+LATTICE_SCAN_CANDIDATES = {
+    0.5: [ROOT / "xi_lattice_scan_H0p5.txt"],
+    1.0: [ROOT / "xi_lattice_scan_H1p0.txt"],
+    1.5: [ROOT / "xi_lattice_scan_H1p5.txt", ROOT / "results_hstar/xi_lattice_scan_H1p5.txt"],
+    2.0: [ROOT / "xi_lattice_scan_H2p0.txt", ROOT / "results_hstar/xi_lattice_scan_H2p0.txt"],
+}
+ODE_CANDIDATES = [
+    ROOT / "xi_ode_scan.txt",
+    ROOT / "ode/xi_DM_ODE_results.txt",
+]
+DEFAULT_TARGET_H = [0.5, 1.0, 1.5, 2.0]
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Collapse xi(theta,tp;H) onto x = tp * H**beta and fit the collapsed fanh model.")
+    p.add_argument("--rho", type=str, default="")
+    p.add_argument("--lattice-raw", type=str, default="")
+    p.add_argument("--ode", type=str, default="")
+    p.add_argument("--fixed-vw", type=float, default=0.9)
+    p.add_argument("--h-values", type=float, nargs="+", default=DEFAULT_TARGET_H)
+    p.add_argument("--bootstrap", type=int, default=200)
+    p.add_argument("--bootstrap-jobs", type=int, default=min(6, max(os.cpu_count() or 1, 1)))
+    p.add_argument("--bootstrap-seed", type=int, default=12345)
+    p.add_argument("--grid-n", type=int, default=120)
+    p.add_argument("--dpi", type=int, default=220)
+    p.add_argument("--outdir", type=str, default="results_collapse")
+    return p.parse_args()
+
+
+def to_native(obj):
+    if isinstance(obj, dict):
+        return {str(k): to_native(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [to_native(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return [to_native(v) for v in obj.tolist()]
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    return obj
+
+
+def save_json(path: Path, payload):
+    path.write_text(json.dumps(to_native(payload), indent=2, sort_keys=True))
+
+
+def error_exit(outdir: Path, message: str, code: int = 1):
+    payload = {"status": "error", "message": message}
+    outdir.mkdir(parents=True, exist_ok=True)
+    save_json(outdir / "_error.json", payload)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return code
+
+
+def rel_rmse(y, yfit):
+    y = np.asarray(y, dtype=np.float64)
+    yfit = np.asarray(yfit, dtype=np.float64)
+    return float(np.sqrt(np.mean(np.square((yfit - y) / np.maximum(y, 1.0e-12)))))
+
+
+def dataset_tag(hstar: float) -> str:
+    return f"H{str(hstar).replace('.', 'p')}"
+
+
+def nearest_theta(theta_values, theta0, atol=5.0e-4):
+    theta_values = np.asarray(theta_values, dtype=np.float64)
+    idx = int(np.argmin(np.abs(theta_values - float(theta0))))
+    if abs(theta_values[idx] - float(theta0)) > atol:
+        raise RuntimeError(f"No theta match for theta={theta0:.10f}")
+    return idx
+
+
+def resolve_first_existing(candidates, user_value=""):
+    if user_value:
+        candidate = Path(user_value).resolve()
+        if candidate.exists():
+            return candidate
+        raise FileNotFoundError(f"Missing requested file: {candidate}")
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return None
+
+
+def potential(theta):
+    theta = np.asarray(theta, dtype=np.float64)
+    return 1.0 - np.cos(theta)
+
+
+def load_f0_table(path: Path, target_h):
+    df = pd.read_csv(path, sep=r"\s+", comment="#")
+    cols = {c.lower(): c for c in df.columns}
+    if {"theta", "f0"} <= set(cols):
+        out = df.rename(columns={cols["theta"]: "theta", cols["f0"]: "F0"})[["theta", "F0"]].copy()
+        return out.sort_values("theta").reset_index(drop=True)
+
+    theta_col = cols.get("theta0", cols.get("theta"))
+    h_col = cols.get("h_pt", cols.get("hstar", cols.get("h")))
+    rho_col = cols.get("rho")
+    if theta_col is None or h_col is None or rho_col is None:
+        raise RuntimeError(
+            f"rho_noPT_data.txt must contain either [theta, F0] or [theta0/theta, H_PT/Hstar/H, rho]. Found columns: {list(df.columns)}"
+        )
+
+    work = df.rename(columns={theta_col: "theta", h_col: "H", rho_col: "rho"})[["theta", "H", "rho"]].copy()
+    work = work[np.isfinite(work["theta"]) & np.isfinite(work["H"]) & np.isfinite(work["rho"])].copy()
+    use = work[work["H"].isin(target_h)].copy()
+    if use.empty:
+        use = work.copy()
+    use["F0_raw"] = use["rho"] / np.maximum(potential(use["theta"].to_numpy()) * np.power(use["H"].to_numpy(), 1.5), 1.0e-18)
+    out = use.groupby("theta", as_index=False)["F0_raw"].median().rename(columns={"F0_raw": "F0"})
+    out = out.sort_values("theta").reset_index(drop=True)
+    return out
+
+
+def merge_f0(df: pd.DataFrame, f0_table: pd.DataFrame):
+    theta_ref = f0_table["theta"].to_numpy(dtype=np.float64)
+    f0_ref = f0_table["F0"].to_numpy(dtype=np.float64)
+    out = df.copy()
+    out["F0"] = [float(f0_ref[nearest_theta(theta_ref, th)]) for th in out["theta"].to_numpy(dtype=np.float64)]
+    return out
+
+
+def parse_prepared_scan(path: Path, hstar: float):
+    df = pd.read_csv(path, sep=r"\s+|,", engine="python", comment="#")
+    if not {"theta", "tp", "xi"}.issubset({str(c).lower() for c in df.columns}):
+        raw = pd.read_csv(path, sep=r"\s+|,", engine="python", comment="#", header=None)
+        if raw.shape[1] < 3:
+            raise RuntimeError(f"Prepared scan {path} must have at least 3 columns [theta, tp, xi].")
+        names = ["theta", "tp", "xi"] + [f"extra_{i}" for i in range(raw.shape[1] - 3)]
+        raw.columns = names
+        raw["H"] = float(hstar)
+        return raw[["theta", "tp", "xi", "H"]].astype(float).sort_values(["theta", "tp"]).reset_index(drop=True)
+    cols = {c.lower(): c for c in df.columns}
+    theta_col = cols.get("theta")
+    tp_col = cols.get("tp")
+    xi_col = cols.get("xi")
+    h_col = cols.get("h", cols.get("hstar"))
+    if theta_col is None or tp_col is None or xi_col is None:
+        raise RuntimeError(f"Prepared scan {path} must contain columns [theta, tp, xi]. Found {list(df.columns)}")
+    out = pd.DataFrame(
+        {
+            "theta": df[theta_col].astype(float),
+            "tp": df[tp_col].astype(float),
+            "xi": df[xi_col].astype(float),
+            "H": float(hstar) if h_col is None else df[h_col].astype(float),
+        }
+    )
+    out = out[np.isfinite(out["theta"]) & np.isfinite(out["tp"]) & np.isfinite(out["xi"]) & np.isfinite(out["H"])]
+    out["dataset"] = dataset_tag(float(hstar))
+    return out.sort_values(["theta", "tp"]).reset_index(drop=True)
+
+
+def load_lattice_data(raw_path: Path | None, fixed_vw: float, target_h):
+    per_h = []
+    explicit_count = 0
+    for hstar in target_h:
+        explicit = resolve_first_existing(LATTICE_SCAN_CANDIDATES.get(hstar, []), "")
+        if explicit is not None:
+            explicit_count += 1
+            per_h.append(parse_prepared_scan(explicit, hstar))
+
+    if explicit_count == len(target_h):
+        return pd.concat(per_h, ignore_index=True)
+
+    if raw_path is None or not raw_path.exists():
+        raise FileNotFoundError("Missing lattice xi inputs. Supply prepared xi_lattice_scan_H*.txt files or a raw energy_ratio_by_theta_data_v*.txt file.")
+
+    df = pd.read_csv(raw_path, sep=r"\s+", comment="#")
+    cols = {c.lower(): c for c in df.columns}
+    theta_col = cols.get("theta0", cols.get("theta"))
+    h_col = cols.get("h_pt", cols.get("hstar", cols.get("h")))
+    beta_over_h_col = cols.get("beta_over_h")
+    xi_col = cols.get("mean_ratio", cols.get("xi"))
+    if theta_col is None or h_col is None or beta_over_h_col is None or xi_col is None:
+        raw = pd.read_csv(raw_path, sep=r"\s+", comment="#", header=None)
+        if raw.shape[1] < 7:
+            raise RuntimeError(f"Raw lattice xi file {raw_path} must contain 7 columns [theta, H, beta_over_H, beta, mean_ratio, std_ratio, N_samples].")
+        raw = raw.iloc[:, :7].copy()
+        raw.columns = ["theta", "H", "beta_over_H", "beta", "xi", "std_ratio", "N_samples"]
+        df = raw
+        cols = {c.lower(): c for c in df.columns}
+        theta_col = "theta"
+        h_col = "H"
+        beta_over_h_col = "beta_over_H"
+        xi_col = "xi"
+
+    work = pd.DataFrame(
+        {
+            "theta": df[theta_col].astype(float),
+            "H": df[h_col].astype(float),
+            "beta_over_H": df[beta_over_h_col].astype(float),
+            "xi": df[xi_col].astype(float),
+        }
+    )
+    sem_col = cols.get("std_ratio")
+    n_col = cols.get("n_samples")
+    if sem_col is not None and n_col is not None:
+        work["xi_sem"] = df[sem_col].astype(float) / np.sqrt(np.maximum(df[n_col].astype(float), 1.0))
+    else:
+        work["xi_sem"] = np.nan
+    work = work[np.isfinite(work["theta"]) & np.isfinite(work["H"]) & np.isfinite(work["beta_over_H"]) & np.isfinite(work["xi"])].copy()
+    work = work[work["H"].isin(target_h)].copy()
+    if work.empty:
+        raise RuntimeError(f"No target H values {target_h} found in raw lattice file {raw_path}")
+
+    perc = PercolationCache()
+    work["tp"] = [perc.get(float(h), float(bh), float(fixed_vw)) for h, bh in zip(work["H"], work["beta_over_H"])]
+    work["dataset"] = [dataset_tag(h) for h in work["H"].to_numpy(dtype=np.float64)]
+    return work.sort_values(["H", "theta", "tp"]).reset_index(drop=True)
+
+
+def load_optional_ode(path: Path | None, fixed_vw: float, target_h):
+    if path is None or not path.exists():
+        return None
+    df = pd.read_csv(path, sep=r"\s+|,", engine="python", comment="#")
+    cols = {c.lower(): c for c in df.columns}
+
+    if {"theta", "tp", "xi"}.issubset(cols):
+        theta_col = cols["theta"]
+        tp_col = cols["tp"]
+        xi_col = cols["xi"]
+        h_col = cols.get("h", cols.get("hstar"))
+        out = pd.DataFrame(
+            {
+                "theta": df[theta_col].astype(float),
+                "tp": df[tp_col].astype(float),
+                "xi": df[xi_col].astype(float),
+                "H": 1.0 if h_col is None else df[h_col].astype(float),
+            }
+        )
+        out = out[np.isfinite(out["theta"]) & np.isfinite(out["tp"]) & np.isfinite(out["xi"]) & np.isfinite(out["H"])].copy()
+        return out[out["H"].isin(target_h)].copy()
+
+    needed = {"vw", "theta0", "h_star", "t_p", "xi_dm"}
+    if needed.issubset(cols):
+        out = pd.DataFrame(
+            {
+                "vw": df[cols["vw"]].astype(float),
+                "theta": df[cols["theta0"]].astype(float),
+                "H": df[cols["h_star"]].astype(float),
+                "tp": df[cols["t_p"]].astype(float),
+                "xi": df[cols["xi_dm"]].astype(float),
+            }
+        )
+        out = out[np.isclose(out["vw"], float(fixed_vw), atol=1.0e-12, rtol=0.0)].copy()
+        out = out[np.isfinite(out["theta"]) & np.isfinite(out["tp"]) & np.isfinite(out["xi"]) & np.isfinite(out["H"])].copy()
+        return out[out["H"].isin(target_h)].copy()
+
+    raw = pd.read_csv(path, sep=r"\s+|,", engine="python", comment="#", header=None)
+    if raw.shape[1] >= 6:
+        raw = raw.iloc[:, :6].copy()
+        raw.columns = ["vw", "theta0", "H_star", "beta_over_H", "t_p", "xi_DM"]
+        out = pd.DataFrame(
+            {
+                "vw": raw["vw"].astype(float),
+                "theta": raw["theta0"].astype(float),
+                "H": raw["H_star"].astype(float),
+                "tp": raw["t_p"].astype(float),
+                "xi": raw["xi_DM"].astype(float),
+            }
+        )
+        out = out[np.isclose(out["vw"], float(fixed_vw), atol=1.0e-12, rtol=0.0)].copy()
+        return out[np.isfinite(out["theta"]) & np.isfinite(out["tp"]) & np.isfinite(out["xi"]) & np.isfinite(out["H"])].copy()
+
+    raise RuntimeError(f"Could not parse optional ODE xi file {path}. Found columns {list(df.columns)}")
+
+
+def compute_x(df: pd.DataFrame, beta: float):
+    out = df.copy()
+    out["x"] = out["tp"].to_numpy(dtype=np.float64) * np.power(out["H"].to_numpy(dtype=np.float64), float(beta))
+    return out
+
+
+def loglog_interp(x, y, xgrid):
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    xgrid = np.asarray(xgrid, dtype=np.float64)
+    mask = np.isfinite(x) & np.isfinite(y) & (x > 0.0) & (y > 0.0)
+    if np.sum(mask) < 2:
+        return np.full_like(xgrid, np.nan, dtype=np.float64)
+    x = x[mask]
+    y = y[mask]
+    order = np.argsort(x)
+    x = x[order]
+    y = y[order]
+    uniq, idx = np.unique(x, return_index=True)
+    x = uniq
+    y = y[idx]
+    if len(x) < 2:
+        return np.full_like(xgrid, np.nan, dtype=np.float64)
+    f = interp1d(np.log(x), np.log(y), kind="linear", bounds_error=False, fill_value=np.nan, assume_sorted=True)
+    out = np.exp(f(np.log(xgrid)))
+    out[(xgrid < x[0]) | (xgrid > x[-1])] = np.nan
+    return out
+
+
+def collapse_score(df: pd.DataFrame, beta: float, grid_n: int):
+    work = compute_x(df, beta)
+    theta_values = np.array(sorted(work["theta"].unique()), dtype=np.float64)
+    scores = []
+    for theta in theta_values:
+        sub = work[np.isclose(work["theta"], theta, atol=5.0e-4, rtol=0.0)].copy()
+        if sub.empty:
+            continue
+        xvals = sub["x"].to_numpy(dtype=np.float64)
+        xvals = xvals[np.isfinite(xvals) & (xvals > 0.0)]
+        if len(xvals) < 4:
+            continue
+        xgrid = np.geomspace(float(np.min(xvals)), float(np.max(xvals)), grid_n)
+        curves = []
+        for h, hsub in sub.groupby("H", sort=True):
+            yi = loglog_interp(hsub["x"].to_numpy(dtype=np.float64), hsub["xi"].to_numpy(dtype=np.float64), xgrid)
+            curves.append(yi)
+        if len(curves) < 2:
+            continue
+        arr = np.vstack(curves)
+        valid = np.sum(np.isfinite(arr), axis=0) >= 2
+        if not np.any(valid):
+            continue
+        arr = arr[:, valid]
+        mean = np.nanmean(arr, axis=0)
+        var = np.nanvar(arr, axis=0, ddof=1)
+        score = var / np.maximum(mean * mean, 1.0e-18)
+        score = score[np.isfinite(score)]
+        if score.size:
+            scores.append(score)
+    if not scores:
+        return np.inf
+    return float(np.mean(np.concatenate(scores)))
+
+
+def find_best_beta(df: pd.DataFrame, grid_n: int):
+    coarse = np.linspace(-2.0, 2.0, 101)
+    coarse_scores = np.array([collapse_score(df, b, grid_n) for b in coarse], dtype=np.float64)
+    if not np.any(np.isfinite(coarse_scores)):
+        raise RuntimeError("Collapse score failed for all beta values.")
+    best_idx = int(np.nanargmin(coarse_scores))
+    lo = max(-3.0, coarse[max(best_idx - 1, 0)])
+    hi = min(3.0, coarse[min(best_idx + 1, len(coarse) - 1)])
+    res = minimize_scalar(lambda b: collapse_score(df, float(b), grid_n), bounds=(lo, hi), method="bounded", options={"xatol": 1.0e-3})
+    beta_best = float(res.x if res.success else coarse[best_idx])
+    score_best = float(res.fun if res.success else coarse_scores[best_idx])
+    return {
+        "beta": beta_best,
+        "collapse_score": score_best,
+        "beta_scan": coarse.tolist(),
+        "score_scan": coarse_scores.tolist(),
+        "refined_interval": [float(lo), float(hi)],
+        "refined_success": bool(res.success),
+    }
+
+
+def robust_linear_loglog(x, y, fscale=0.05):
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+
+    def resid(par):
+        return par[0] + par[1] * x - y
+
+    res = least_squares(resid, x0=np.array([float(np.median(y)), 1.5], dtype=np.float64), loss="soft_l1", f_scale=fscale)
+    rss = float(np.sum(np.square(res.fun)))
+    dof = max(len(y) - 2, 1)
+    try:
+        cov = (rss / dof) * np.linalg.inv(res.jac.T @ res.jac)
+    except np.linalg.LinAlgError:
+        cov = np.full((2, 2), np.nan, dtype=np.float64)
+    return {
+        "intercept": float(res.x[0]),
+        "slope": float(res.x[1]),
+        "intercept_err": float(np.sqrt(cov[0, 0])) if np.isfinite(cov[0, 0]) else np.nan,
+        "slope_err": float(np.sqrt(cov[1, 1])) if np.isfinite(cov[1, 1]) else np.nan,
+    }
+
+
+def fit_tail_amplitude_x(x, xi):
+    x = np.asarray(x, dtype=np.float64)
+    xi = np.asarray(xi, dtype=np.float64)
+    scale = np.power(x, 1.5)
+
+    def resid(par):
+        c = par[0]
+        return (c * scale - xi) / np.maximum(xi, 1.0e-12)
+
+    c0 = float(np.median(xi / np.maximum(scale, 1.0e-18)))
+    res = least_squares(resid, x0=np.array([c0]), loss="soft_l1", f_scale=0.05)
+    rss = float(np.sum(np.square(res.fun)))
+    dof = max(len(xi) - 1, 1)
+    try:
+        cov = (rss / dof) * np.linalg.inv(res.jac.T @ res.jac)
+        c_err = float(np.sqrt(cov[0, 0]))
+    except np.linalg.LinAlgError:
+        c_err = np.nan
+    return {"C": float(res.x[0]), "C_err": c_err}
+
+
+def fit_tail(df: pd.DataFrame, outdir: Path, dpi: int):
+    rows = []
+    for theta, group in df.groupby("theta", sort=True):
+        group = group.sort_values("x").copy()
+        ntail = max(5, int(math.ceil(0.10 * len(group))))
+        tail = group.tail(ntail).copy()
+        fit = fit_tail_amplitude_x(tail["x"].to_numpy(dtype=np.float64), tail["xi"].to_numpy(dtype=np.float64))
+        f0 = float(group["F0"].iloc[0])
+        rows.append(
+            {
+                "theta": float(theta),
+                "F0": f0,
+                "F_inf_tail": float(fit["C"] * f0 * f0),
+                "err": float(abs(fit["C_err"] * f0 * f0)) if np.isfinite(fit["C_err"]) else np.nan,
+                "C": fit["C"],
+                "C_err": fit["C_err"],
+                "n_tail": int(ntail),
+            }
+        )
+
+        fig, ax = plt.subplots(figsize=(5.8, 4.2))
+        for h, hsub in group.groupby("H", sort=True):
+            ax.plot(hsub["x"], hsub["xi"], "o", ms=3.4, label=rf"$H={h:g}$")
+        xfit = np.geomspace(float(np.min(group["x"])), float(np.max(group["x"])), 200)
+        ax.plot(xfit, fit["C"] * np.power(xfit, 1.5), color="black", lw=1.8, label=r"tail fit $C x^{3/2}$")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel(r"$x = t_p H^\beta$")
+        ax.set_ylabel(r"$\xi$")
+        ax.set_title(rf"Tail fit, $\theta={theta:.3f}$")
+        ax.grid(alpha=0.25)
+        ax.legend(frameon=False, fontsize=8)
+        fig.tight_layout()
+        fig.savefig(outdir / f"tail_fit_theta_{theta:.3f}.png", dpi=dpi)
+        plt.close(fig)
+
+    out = pd.DataFrame(rows).sort_values("theta").reset_index(drop=True)
+    out.to_csv(outdir / "Finf_tail.csv", index=False)
+    return out
+
+
+def inversion_single_theta(group: pd.DataFrame, finf_tail: float):
+    group = group.sort_values("x").copy()
+    f0 = float(group["F0"].iloc[0])
+    x = group["x"].to_numpy(dtype=np.float64)
+    xi = group["xi"].to_numpy(dtype=np.float64)
+    T = np.power(x, 1.5) * finf_tail / np.maximum(f0 * f0, 1.0e-18)
+    D = xi - T
+    mask = (D > 0.05) & (D < 0.95)
+    work = group.loc[mask].copy()
+    if len(work) < 3:
+        return None
+    x = work["x"].to_numpy(dtype=np.float64)
+    D = work["xi"].to_numpy(dtype=np.float64) - np.power(x, 1.5) * finf_tail / np.maximum(f0 * f0, 1.0e-18)
+    Y = 1.0 / D - 1.0
+    valid = np.isfinite(Y) & (Y > 0.0) & np.isfinite(x) & (x > 0.0)
+    if np.sum(valid) < 3:
+        return None
+    x = x[valid]
+    Y = Y[valid]
+    fit = robust_linear_loglog(np.log(x), np.log(Y))
+    return {
+        "theta": float(group["theta"].iloc[0]),
+        "r": fit["slope"],
+        "r_err": fit["slope_err"],
+        "intercept": fit["intercept"],
+        "n_points_used": int(len(x)),
+        "x_fit": x,
+        "logY_fit": np.log(Y),
+    }
+
+
+def pooled_inversion(rows):
+    valid = [row for row in rows if row is not None]
+    if not valid:
+        return {"success": False, "message": "No inversion rows"}
+    theta_vals = np.array(sorted({row["theta"] for row in valid}), dtype=np.float64)
+    x = np.concatenate([np.log(row["x_fit"]) for row in valid])
+    y = np.concatenate([row["logY_fit"] for row in valid])
+    theta_index = np.concatenate([np.full(len(row["x_fit"]), nearest_theta(theta_vals, row["theta"]), dtype=np.int64) for row in valid])
+
+    def resid(par):
+        intercepts = par[:-1]
+        slope = par[-1]
+        return intercepts[theta_index] + slope * x - y
+
+    x0 = np.zeros(len(theta_vals) + 1, dtype=np.float64)
+    for i, th in enumerate(theta_vals):
+        row = next(row for row in valid if np.isclose(row["theta"], th, atol=5.0e-4))
+        x0[i] = row["intercept"]
+    x0[-1] = float(np.nanmedian([row["r"] for row in valid]))
+    res = least_squares(resid, x0=x0, loss="soft_l1", f_scale=0.05)
+    return {
+        "success": bool(res.success),
+        "r_global": float(res.x[-1]),
+        "theta_intercepts": {f"{float(th):.10f}": float(res.x[i]) for i, th in enumerate(theta_vals)},
+        "n_points": int(len(y)),
+    }
+
+
+def plot_inversion(rows, outdir: Path, dpi: int):
+    for row in rows:
+        if row is None:
+            continue
+        x = np.log(row["x_fit"])
+        y = row["logY_fit"]
+        yfit = row["intercept"] + row["r"] * x
+        fig, ax = plt.subplots(figsize=(5.6, 4.2))
+        ax.plot(x, y, "ko", ms=3.4, label="data")
+        ax.plot(x, yfit, color="tab:red", lw=1.8, label=rf"fit, $r={row['r']:.3f}$")
+        ax.set_xlabel(r"$\log x$")
+        ax.set_ylabel(r"$\log Y$")
+        ax.set_title(rf"Inversion, $\theta={row['theta']:.3f}$")
+        ax.grid(alpha=0.25)
+        ax.legend(frameon=False, fontsize=8)
+        fig.tight_layout()
+        fig.savefig(outdir / f"logY_vs_logx_theta_{row['theta']:.3f}.png", dpi=dpi)
+        plt.close(fig)
+
+
+def xi_model_from_params(df: pd.DataFrame, theta_values: np.ndarray, params: np.ndarray):
+    t_c = float(params[0])
+    r = float(params[1])
+    finf = np.asarray(params[2:], dtype=np.float64)
+    theta_index = np.array([nearest_theta(theta_values, th) for th in df["theta"].to_numpy(dtype=np.float64)], dtype=np.int64)
+    x = df["x"].to_numpy(dtype=np.float64)
+    f0 = df["F0"].to_numpy(dtype=np.float64)
+    transient = 1.0 / (1.0 + np.power(x / max(t_c, 1.0e-12), r))
+    xi_fit = np.power(x, 1.5) * finf[theta_index] / np.maximum(f0 * f0, 1.0e-18) + transient
+    return xi_fit, theta_index
+
+
+def fit_global(df: pd.DataFrame, finf_tail_df: pd.DataFrame):
+    theta_values = np.array(sorted(df["theta"].unique()), dtype=np.float64)
+    tail_map = {float(row.theta): float(row.F_inf_tail) for row in finf_tail_df.itertuples(index=False)}
+    finf0 = np.array([max(tail_map.get(float(th), np.nanmedian(finf_tail_df["F_inf_tail"])), 1.0e-8) for th in theta_values], dtype=np.float64)
+    x0 = np.concatenate([np.array([1.5, 1.5], dtype=np.float64), finf0])
+    lower = np.concatenate([np.array([1.0e-3, 0.1], dtype=np.float64), np.full(len(theta_values), 1.0e-6, dtype=np.float64)])
+    upper = np.concatenate([np.array([10.0, 20.0], dtype=np.float64), np.full(len(theta_values), 1.0e4, dtype=np.float64)])
+
+    def resid(par):
+        xi_fit, _ = xi_model_from_params(df, theta_values, par)
+        return (xi_fit - df["xi"].to_numpy(dtype=np.float64)) / np.maximum(df["xi"].to_numpy(dtype=np.float64), 1.0e-12)
+
+    res0 = least_squares(resid, x0=x0, bounds=(lower, upper), loss="soft_l1", f_scale=0.05, max_nfev=6000)
+    res = least_squares(resid, x0=res0.x, bounds=(lower, upper), loss="linear", max_nfev=6000)
+    xi_fit, theta_index = xi_model_from_params(df, theta_values, res.x)
+    rss = float(np.sum(np.square((xi_fit - df["xi"].to_numpy(dtype=np.float64)) / np.maximum(df["xi"].to_numpy(dtype=np.float64), 1.0e-12))))
+    n = int(len(df))
+    k = int(len(res.x))
+    dof = max(n - k, 1)
+    try:
+        cov = (rss / dof) * np.linalg.inv(res.jac.T @ res.jac)
+    except np.linalg.LinAlgError:
+        cov = np.full((len(res.x), len(res.x)), np.nan, dtype=np.float64)
+    aic = float(n * math.log(max(rss, 1.0e-18) / n) + 2.0 * k)
+    bic = float(n * math.log(max(rss, 1.0e-18) / n) + k * math.log(n))
+    return {
+        "success": bool(res.success),
+        "message": res.message,
+        "params": res.x,
+        "theta_values": theta_values,
+        "theta_index": theta_index,
+        "xi_fit": xi_fit,
+        "covariance": cov,
+        "dof": dof,
+        "rel_rmse": rel_rmse(df["xi"].to_numpy(dtype=np.float64), xi_fit),
+        "rss_frac": rss,
+        "AIC": aic,
+        "BIC": bic,
+        "jac": res.jac,
+    }
+
+
+def save_global_fit(result: dict, beta: float, outdir: Path):
+    params = np.asarray(result["params"], dtype=np.float64)
+    cov = np.asarray(result["covariance"], dtype=np.float64)
+    t_c_err = float(np.sqrt(cov[0, 0])) if np.isfinite(cov[0, 0]) else np.nan
+    r_err = float(np.sqrt(cov[1, 1])) if np.isfinite(cov[1, 1]) else np.nan
+    f_err = [float(np.sqrt(cov[2 + i, 2 + i])) if np.isfinite(cov[2 + i, 2 + i]) else np.nan for i in range(len(result["theta_values"]))]
+    payload = {
+        "success": result["success"],
+        "message": result["message"],
+        "beta": beta,
+        "t_c": float(params[0]),
+        "t_c_err": t_c_err,
+        "r": float(params[1]),
+        "r_err": r_err,
+        "F_inf": {
+            f"{float(th):.10f}": {"value": float(params[2 + i]), "err": f_err[i]}
+            for i, th in enumerate(result["theta_values"])
+        },
+        "dof": int(result["dof"]),
+        "rel_rmse": float(result["rel_rmse"]),
+        "rss_frac": float(result["rss_frac"]),
+        "AIC": float(result["AIC"]),
+        "BIC": float(result["BIC"]),
+        "covariance": result["covariance"].tolist(),
+    }
+    save_json(outdir / "global_fit.json", payload)
+    return payload
+
+
+def bootstrap_global_fit(df: pd.DataFrame, fit_result: dict, bootstrap_n: int, bootstrap_jobs: int, bootstrap_seed: int):
+    theta_values = fit_result["theta_values"]
+    xi_fit = fit_result["xi_fit"]
+    resid = (df["xi"].to_numpy(dtype=np.float64) - xi_fit) / np.maximum(xi_fit, 1.0e-12)
+    theta_index = fit_result["theta_index"]
+    xbest = np.asarray(fit_result["params"], dtype=np.float64)
+
+    def worker(seed):
+        rng = np.random.default_rng(seed)
+        boot = df.copy()
+        xi_boot = xi_fit.copy()
+        for i, _ in enumerate(theta_values):
+            mask = theta_index == i
+            if np.sum(mask) == 0:
+                continue
+            sampled = rng.choice(resid[mask], size=np.sum(mask), replace=True)
+            xi_boot[mask] = np.maximum(xi_fit[mask] * (1.0 + sampled), 1.0e-10)
+        boot["xi"] = xi_boot
+        rec = fit_global(boot, pd.DataFrame({"theta": theta_values, "F_inf_tail": xbest[2:]}))
+        return rec["params"]
+
+    seeds = [int(bootstrap_seed + i) for i in range(bootstrap_n)]
+    boot_params = Parallel(n_jobs=bootstrap_jobs)(delayed(worker)(seed) for seed in seeds)
+    arr = np.asarray(boot_params, dtype=np.float64)
+    payload = {
+        "t_c": {
+            "p16": float(np.percentile(arr[:, 0], 16.0)),
+            "p50": float(np.percentile(arr[:, 0], 50.0)),
+            "p84": float(np.percentile(arr[:, 0], 84.0)),
+        },
+        "r": {
+            "p16": float(np.percentile(arr[:, 1], 16.0)),
+            "p50": float(np.percentile(arr[:, 1], 50.0)),
+            "p84": float(np.percentile(arr[:, 1], 84.0)),
+        },
+        "F_inf": {},
+    }
+    for i, th in enumerate(theta_values):
+        payload["F_inf"][f"{float(th):.10f}"] = {
+            "p16": float(np.percentile(arr[:, 2 + i], 16.0)),
+            "p50": float(np.percentile(arr[:, 2 + i], 50.0)),
+            "p84": float(np.percentile(arr[:, 2 + i], 84.0)),
+        }
+    return payload
+
+
+def fit_per_h_models(df: pd.DataFrame, finf_tail_df: pd.DataFrame):
+    results = {}
+    for h, sub in df.groupby("H", sort=True):
+        sub_tail = finf_tail_df.copy()
+        rec = fit_global(sub, sub_tail)
+        results[dataset_tag(float(h))] = {
+            "H": float(h),
+            "t_c": float(rec["params"][0]),
+            "r": float(rec["params"][1]),
+            "rel_rmse": float(rec["rel_rmse"]),
+            "AIC": float(rec["AIC"]),
+            "BIC": float(rec["BIC"]),
+            "success": bool(rec["success"]),
+        }
+    return results
+
+
+def plot_beta_scan(best_beta_payload: dict, outdir: Path, dpi: int):
+    beta_scan = np.asarray(best_beta_payload["beta_scan"], dtype=np.float64)
+    score_scan = np.asarray(best_beta_payload["score_scan"], dtype=np.float64)
+    fig, ax = plt.subplots(figsize=(6.0, 4.4))
+    ax.plot(beta_scan, score_scan, color="tab:blue", lw=1.8)
+    ax.axvline(best_beta_payload["beta"], color="tab:red", ls="--", lw=1.4, label=rf"best $\beta={best_beta_payload['beta']:.4f}$")
+    ax.set_xlabel(r"$\beta$")
+    ax.set_ylabel(r"$S(\beta)$")
+    ax.set_title("Collapse score scan")
+    ax.grid(alpha=0.25)
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    fig.savefig(outdir / "best_beta_plot.png", dpi=dpi)
+    plt.close(fig)
+
+
+def plot_collapse_overlay(df: pd.DataFrame, fit_result: dict, outdir: Path, dpi: int):
+    theta_values = np.array(sorted(df["theta"].unique()), dtype=np.float64)
+    colors = plt.cm.viridis(np.linspace(0.1, 0.9, len(sorted(df["H"].unique()))))
+    fig, axes = plt.subplots(2, 3, figsize=(14.0, 8.0), sharex=False, sharey=False)
+    for ax, theta in zip(axes.flat, theta_values):
+        sub = df[np.isclose(df["theta"], theta, atol=5.0e-4, rtol=0.0)].copy()
+        for color, (h, hsub) in zip(colors, sub.groupby("H", sort=True)):
+            ax.plot(hsub["x"], hsub["xi"], "o", ms=3.2, color=color, label=rf"$H={h:g}$")
+            hfit = fit_result["xi_fit"][sub.index.to_numpy()][np.isclose(sub["H"], h, atol=1.0e-12, rtol=0.0)]
+            xfit = hsub["x"].to_numpy(dtype=np.float64)
+            order = np.argsort(xfit)
+            ax.plot(xfit[order], hfit[order], "-", lw=1.5, color=color)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel(r"$x = t_p H^\beta$")
+        ax.set_ylabel(r"$\xi$")
+        ax.set_title(rf"$\theta={theta:.3f}$")
+        ax.grid(alpha=0.25)
+    axes.flat[0].legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    fig.savefig(outdir / "collapse_overlay.png", dpi=dpi)
+    plt.close(fig)
+
+
+def plot_fanh_theta(df: pd.DataFrame, fit_result: dict, outdir: Path, dpi: int):
+    theta_values = fit_result["theta_values"]
+    params = fit_result["params"]
+    t_c = float(params[0])
+    r = float(params[1])
+    finf = np.asarray(params[2:], dtype=np.float64)
+    for theta in theta_values:
+        idx = nearest_theta(theta_values, theta)
+        sub = df[np.isclose(df["theta"], theta, atol=5.0e-4, rtol=0.0)].copy().sort_values("x")
+        fanh_data = sub["xi"].to_numpy(dtype=np.float64) * sub["F0"].to_numpy(dtype=np.float64) / np.power(sub["tp"].to_numpy(dtype=np.float64), 1.5)
+        xfit = np.geomspace(float(np.min(sub["x"])), float(np.max(sub["x"])), 300)
+        f0 = float(sub["F0"].iloc[0])
+        fanh_fit = finf[idx] / np.maximum(f0, 1.0e-18) + f0 / (np.power(xfit, 1.5) * (1.0 + np.power(xfit / max(t_c, 1.0e-12), r)))
+        fig, ax = plt.subplots(figsize=(5.8, 4.2))
+        for h, hsub in sub.groupby("H", sort=True):
+            mask = np.isclose(sub["H"], h, atol=1.0e-12, rtol=0.0)
+            ax.plot(hsub["x"], fanh_data[mask], "o", ms=3.3, label=rf"$H={h:g}$")
+        ax.plot(xfit, fanh_fit, color="black", lw=1.8, label="model")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel(r"$x = t_p H^\beta$")
+        ax.set_ylabel("fanh")
+        ax.set_title(rf"$\theta={theta:.3f}$")
+        ax.grid(alpha=0.25)
+        ax.legend(frameon=False, fontsize=8)
+        fig.tight_layout()
+        fig.savefig(outdir / f"fanh_theta_{theta:.3f}.png", dpi=dpi)
+        plt.close(fig)
+
+
+def plot_residual_heatmap(df: pd.DataFrame, fit_result: dict, outdir: Path, dpi: int):
+    theta_values = np.array(sorted(df["theta"].unique()), dtype=np.float64)
+    x = df["x"].to_numpy(dtype=np.float64)
+    resid = (df["xi"].to_numpy(dtype=np.float64) - fit_result["xi_fit"]) / np.maximum(df["xi"].to_numpy(dtype=np.float64), 1.0e-12)
+    xbins = np.geomspace(float(np.min(x)), float(np.max(x)), 40)
+    heat = np.full((len(theta_values), len(xbins) - 1), np.nan, dtype=np.float64)
+    for i, theta in enumerate(theta_values):
+        mask_theta = np.isclose(df["theta"], theta, atol=5.0e-4, rtol=0.0)
+        for j in range(len(xbins) - 1):
+            mask_bin = mask_theta & (x >= xbins[j]) & (x < xbins[j + 1])
+            if np.any(mask_bin):
+                heat[i, j] = float(np.mean(resid[mask_bin]))
+    fig, ax = plt.subplots(figsize=(8.8, 4.8))
+    pcm = ax.pcolormesh(xbins, np.arange(len(theta_values) + 1), heat, cmap="coolwarm", vmin=-0.2, vmax=0.2, shading="auto")
+    ax.set_xscale("log")
+    ax.set_xlabel(r"$x = t_p H^\beta$")
+    ax.set_ylabel(r"$\theta$ index")
+    ax.set_title("Relative residual heatmap")
+    ax.set_yticks(np.arange(len(theta_values)) + 0.5)
+    ax.set_yticklabels([f"{th:.3f}" for th in theta_values])
+    fig.colorbar(pcm, ax=ax, label=r"$(\xi_{\rm data}-\xi_{\rm model})/\xi_{\rm data}$")
+    fig.tight_layout()
+    fig.savefig(outdir / "residual_heatmap.png", dpi=dpi)
+    plt.close(fig)
+
+
+def slope_curvature(theta: float, df: pd.DataFrame, outdir: Path, dpi: int):
+    sub = df[np.isclose(df["theta"], theta, atol=5.0e-4, rtol=0.0)].copy().sort_values("x")
+    if len(sub) < 5:
+        return
+    grouped = sub.groupby("x", as_index=False)["xi"].mean().sort_values("x")
+    x = grouped["x"].to_numpy(dtype=np.float64)
+    xi = grouped["xi"].to_numpy(dtype=np.float64)
+    mask = np.isfinite(x) & np.isfinite(xi) & (x > 0.0) & (xi > 0.0)
+    x = x[mask]
+    xi = xi[mask]
+    if len(x) < 5:
+        return
+    lx = np.log(x)
+    ly = np.log(xi)
+    window = min(len(lx) if len(lx) % 2 == 1 else len(lx) - 1, 7)
+    if window < 5:
+        window = 5 if len(lx) >= 5 else len(lx) | 1
+    if window >= len(lx):
+        window = len(lx) - 1 if len(lx) % 2 == 0 else len(lx)
+    if window < 5:
+        d1 = np.gradient(ly, lx)
+        d2 = np.gradient(d1, lx)
+    else:
+        d1 = savgol_filter(ly, window_length=window, polyorder=2, deriv=1, delta=float(np.mean(np.diff(lx))))
+        d2 = savgol_filter(ly, window_length=window, polyorder=2, deriv=2, delta=float(np.mean(np.diff(lx))))
+    fig, axes = plt.subplots(2, 1, figsize=(5.8, 6.2), sharex=True)
+    axes[0].plot(x, d1, "o-", color="tab:blue", ms=3.2)
+    axes[0].set_xscale("log")
+    axes[0].set_ylabel(r"$d\ln\xi/d\ln x$")
+    axes[0].grid(alpha=0.25)
+    axes[0].set_title(rf"Slopes and curvature, $\theta={theta:.3f}$")
+    axes[1].plot(x, d2, "o-", color="tab:red", ms=3.2)
+    axes[1].set_xscale("log")
+    axes[1].set_xlabel(r"$x = t_p H^\beta$")
+    axes[1].set_ylabel(r"$d^2\ln\xi/d(\ln x)^2$")
+    axes[1].grid(alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(outdir / f"slope_curvature_theta_{theta:.3f}.png", dpi=dpi)
+    plt.close(fig)
+
+
+def main():
+    args = parse_args()
+    outdir = (ROOT / args.outdir).resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        rho_path = resolve_first_existing(RHO_CANDIDATES, args.rho)
+        raw_lattice_path = resolve_first_existing(LATTICE_RAW_CANDIDATES, args.lattice_raw)
+        ode_path = resolve_first_existing(ODE_CANDIDATES, args.ode) if (args.ode or any(p.exists() for p in ODE_CANDIDATES)) else None
+        if rho_path is None:
+            raise FileNotFoundError("Missing rho_noPT_data.txt. Supply rho_noPT_data.txt or lattice_data/data/rho_noPT_data.txt.")
+
+        target_h = sorted(set(float(h) for h in args.h_values))
+        f0_table = load_f0_table(rho_path, target_h)
+        f0_table.to_csv(outdir / "F0_table.csv", index=False)
+
+        lattice_df = load_lattice_data(raw_lattice_path, args.fixed_vw, target_h)
+        lattice_df = merge_f0(lattice_df, f0_table)
+        lattice_df = lattice_df[np.isfinite(lattice_df["F0"]) & (lattice_df["F0"] > 0.0)].copy()
+        if lattice_df.empty:
+            raise RuntimeError("No valid lattice rows after merging F0(theta).")
+
+        ode_df = load_optional_ode(ode_path, args.fixed_vw, target_h)
+        if ode_df is not None and not ode_df.empty:
+            ode_df = merge_f0(ode_df, f0_table)
+
+        beta_payload = find_best_beta(lattice_df, args.grid_n)
+        save_json(outdir / "best_beta.json", beta_payload)
+        plot_beta_scan(beta_payload, outdir, args.dpi)
+
+        collapsed = compute_x(lattice_df, beta_payload["beta"])
+        collapsed["fanh_data"] = collapsed["xi"].to_numpy(dtype=np.float64) * collapsed["F0"].to_numpy(dtype=np.float64) / np.power(
+            collapsed["tp"].to_numpy(dtype=np.float64), 1.5
+        )
+
+        finf_tail_df = fit_tail(collapsed, outdir, args.dpi)
+        inversion_rows = []
+        for theta, group in collapsed.groupby("theta", sort=True):
+            finf_tail = float(finf_tail_df.loc[np.isclose(finf_tail_df["theta"], theta, atol=5.0e-4), "F_inf_tail"].iloc[0])
+            inversion_rows.append(inversion_single_theta(group, finf_tail))
+        inversion_global = pooled_inversion(inversion_rows)
+        plot_inversion(inversion_rows, outdir, args.dpi)
+
+        fit_result = fit_global(collapsed, finf_tail_df)
+        global_payload = save_global_fit(fit_result, beta_payload["beta"], outdir)
+
+        bootstrap_payload = bootstrap_global_fit(collapsed, fit_result, args.bootstrap, args.bootstrap_jobs, args.bootstrap_seed)
+        save_json(outdir / "bootstrap_global_fit.json", bootstrap_payload)
+
+        plot_collapse_overlay(collapsed, fit_result, outdir, args.dpi)
+        plot_residual_heatmap(collapsed, fit_result, outdir, args.dpi)
+        plot_fanh_theta(collapsed, fit_result, outdir, args.dpi)
+        for theta in sorted(collapsed["theta"].unique()):
+            slope_curvature(float(theta), collapsed, outdir, args.dpi)
+
+        per_h = fit_per_h_models(collapsed, finf_tail_df)
+        model_comp = {
+            "collapsed_global": {
+                "beta": beta_payload["beta"],
+                "AIC": global_payload["AIC"],
+                "BIC": global_payload["BIC"],
+                "rel_rmse": global_payload["rel_rmse"],
+            },
+            "independent_per_H": per_h,
+            "sum_AIC_per_H": float(sum(rec["AIC"] for rec in per_h.values())),
+            "sum_BIC_per_H": float(sum(rec["BIC"] for rec in per_h.values())),
+            "delta_AIC": float(sum(rec["AIC"] for rec in per_h.values()) - global_payload["AIC"]),
+            "delta_BIC": float(sum(rec["BIC"] for rec in per_h.values()) - global_payload["BIC"]),
+        }
+        save_json(outdir / "model_comparison.json", model_comp)
+
+        summary = {
+            "status": "ok",
+            "beta": beta_payload["beta"],
+            "collapse_score": beta_payload["collapse_score"],
+            "available_H": sorted(float(h) for h in collapsed["H"].unique()),
+            "n_lattice_points": int(len(collapsed)),
+            "ode_loaded": bool(ode_df is not None and not ode_df.empty),
+            "global_fit": {
+                "t_c": global_payload["t_c"],
+                "r": global_payload["r"],
+                "rel_rmse": global_payload["rel_rmse"],
+                "AIC": global_payload["AIC"],
+                "BIC": global_payload["BIC"],
+            },
+            "bootstrap_68": {
+                "t_c": [bootstrap_payload["t_c"]["p16"], bootstrap_payload["t_c"]["p84"]],
+                "r": [bootstrap_payload["r"]["p16"], bootstrap_payload["r"]["p84"]],
+            },
+            "inversion_global": inversion_global,
+            "model_comparison": {
+                "delta_AIC": model_comp["delta_AIC"],
+                "delta_BIC": model_comp["delta_BIC"],
+            },
+        }
+        save_json(outdir / "final_summary.json", summary)
+        print(json.dumps(to_native(summary), indent=2, sort_keys=True))
+        return 0
+    except Exception as exc:
+        return error_exit(outdir, str(exc))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,3 +1,15 @@
 __pycache__/
 *.py[cod]
 outputs/
+
+# AI assistant context
+CLAUDE.md
+
+# Generated results (plots, fit outputs, JSON summaries)
+results_*/
+tmp_*/
+ode/analysis/results/
+
+# Julia package environments and depots (vendored tooling, not source)
+.julia_depot_pysr*/
+.juliapkg_project_pysr*/
