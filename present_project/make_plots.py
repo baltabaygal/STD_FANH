@@ -10,6 +10,9 @@ Figures produced (all saved to present_project/ as 220-DPI PNGs):
   fig4_ftilde_vs_betaH.png   xi*F0/tp^{3/2} vs beta/H*
   fig5_vw09_best_fit.png     vw=0.9 collapse with fitted FANH model overlaid
   fig6_all_vw_model.png      vw=0.9 model applied to all vw (shows degradation)
+  fig7_s_tp_vw.png           Inferred pointwise shift s(tp,vw) + fitted formula
+  fig8_shift_collapse.png    All-vw collapse after applying the shift (xi vs x_eff)
+  fig9_residual_comparison.png  Fractional residuals before vs after shift, per vw
 
 Run from repo root:
   conda run -n julia_env python present_project/make_plots.py
@@ -43,7 +46,10 @@ VW_COLORS  = {0.3: "#e41a1c", 0.5: "#ff7f00", 0.7: "#4daf4a", 0.9: "#377eb8"}
 H_MARKERS  = {0.5: "o", 1.0: "s", 1.5: "^", 2.0: "D"}
 H_COLORS   = {0.5: "#1f78b4", 1.0: "#33a02c", 1.5: "#e31a1c", 2.0: "#ff7f00"}
 
-FITS_PATH  = ROOT / "results_vw_param_evolution" / "per_vw_fits.json"
+FITS_PATH       = ROOT / "results_vw_param_evolution" / "per_vw_fits.json"
+SHIFT_TABLE     = ROOT / "results_pointwise_shift_from_vw0p9_baseline" / "pointwise_shift_table.csv"
+SHIFT_POWERLAW  = ROOT / "results_pointwise_shift_powerlaw" / "final_summary.json"
+SHIFT_APPLIED   = ROOT / "results_pointwise_shift_powerlaw_applied" / "predictions.csv"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -369,6 +375,287 @@ def make_all_vw_model_comparison(frames, fits):
     print("  saved fig6_all_vw_model.png")
 
 
+# ── shift-pipeline figures ────────────────────────────────────────────────────
+
+def _s_formula(tp, vw, A, m, p, vw_ref=0.9):
+    return 1.0 + A * (np.power(vw_ref / np.asarray(vw), m) - 1.0) * np.power(np.asarray(tp), p)
+
+
+def make_s_tp_vw(outname="fig7_s_tp_vw.png"):
+    """
+    Fig 7 — inferred pointwise shift s vs tp for each vw.
+    Panel A (large): scatter of all s(tp) coloured by vw, fitted formula as lines.
+    Panel B (inset-style, right): s vs vw at fixed tp quantiles to show the vw dependence.
+    """
+    if not SHIFT_TABLE.exists() or not SHIFT_POWERLAW.exists():
+        print("  skipped fig7 (shift table / powerlaw json not found)")
+        return
+
+    df = pd.read_csv(SHIFT_TABLE)
+    df = df[df["in_range"]].copy()
+    params = json.loads(SHIFT_POWERLAW.read_text())["best_params_named"]
+    A, m, p = float(params["A"]), float(params["m"]), float(params["p"])
+    vw_ref = 0.9
+
+    vw_values = np.sort(df["v_w"].unique())
+    cmap = mpl.colormaps["viridis"]
+    vw_colors = {vw: cmap(i / max(len(vw_values) - 1, 1)) for i, vw in enumerate(vw_values)}
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5),
+                              gridspec_kw={"width_ratios": [2, 1]})
+
+    # ── left panel: s vs tp ──
+    ax = axes[0]
+    for vw in vw_values:
+        sub = df[np.isclose(df["v_w"], vw, atol=1e-9)].copy()
+        ax.scatter(sub["tp"], sub["s_pointwise"], s=10,
+                   color=vw_colors[vw], alpha=0.30, rasterized=True)
+        tp_fit = np.geomspace(float(sub["tp"].min()), float(sub["tp"].max()), 400)
+        s_fit  = _s_formula(tp_fit, vw, A, m, p)
+        ax.plot(tp_fit, s_fit, color=vw_colors[vw], lw=2.2,
+                label=rf"$v_w = {vw:.1f}$")
+
+    ax.axhline(1.0, color="black", lw=1.0, ls="--", alpha=0.6)
+    ax.set_xscale("log")
+    ax.set_xlabel(r"$t_p$", fontsize=12)
+    ax.set_ylabel(r"$s(t_p,\, v_w)$", fontsize=12)
+    ax.set_title(
+        r"Effective-time shift $s = x_{\rm eff}/x_{\rm base}$" + "\n"
+        + rf"$s = 1 + {A:.3f}\left[(0.9/v_w)^{{{m:.3f}}} - 1\right] t_p^{{{p:.3f}}}$",
+        fontsize=10
+    )
+    ax.legend(frameon=False, fontsize=10)
+    ax.grid(alpha=0.25)
+
+    # ── right panel: s vs vw at three fixed tp quantiles ──
+    ax2 = axes[1]
+    tp_all = df["tp"].to_numpy()
+    tp_quantiles = np.quantile(tp_all, [0.20, 0.50, 0.80])
+    qcolors = ["#d62728", "#1f77b4", "#2ca02c"]
+    qlabels = [r"$t_p$ = 20th pct", r"$t_p$ = 50th pct", r"$t_p$ = 80th pct"]
+    vw_fine = np.linspace(0.25, 0.95, 300)
+    for tp_q, qc, ql in zip(tp_quantiles, qcolors, qlabels):
+        s_curve = _s_formula(tp_q, vw_fine, A, m, p)
+        ax2.plot(vw_fine, s_curve, color=qc, lw=2.0, label=rf"{ql} ($t_p={tp_q:.2f}$)")
+        # scatter: binned median at that tp percentile ±10%
+        lo, hi = tp_q * 0.90, tp_q * 1.10
+        for vw in vw_values:
+            sub = df[np.isclose(df["v_w"], vw, atol=1e-9) &
+                     (df["tp"] >= lo) & (df["tp"] <= hi)]
+            if sub.empty:
+                continue
+            ax2.scatter(vw, sub["s_pointwise"].median(), s=50,
+                        color=qc, zorder=4, marker="D")
+
+    ax2.axhline(1.0, color="black", lw=1.0, ls="--", alpha=0.6)
+    ax2.set_xlabel(r"$v_w$", fontsize=12)
+    ax2.set_ylabel(r"$s(t_p,\, v_w)$", fontsize=12)
+    ax2.set_title(r"$s$ vs $v_w$ at fixed $t_p$", fontsize=10)
+    ax2.legend(frameon=False, fontsize=7.5, loc="upper right")
+    ax2.grid(alpha=0.25)
+
+    fig.tight_layout()
+    fig.savefig(OUTDIR / outname, dpi=DPI, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  saved {outname}")
+
+
+def make_shift_collapse(outname="fig8_shift_collapse.png"):
+    """
+    Fig 8 — all-vw collapse after applying the shift.
+    6 panels (one per theta0 subset), each showing xi vs x_eff for all vw and H*,
+    with the vw=0.9 FANH baseline curve overlaid.  Points collapse onto a single curve.
+    """
+    if not SHIFT_APPLIED.exists() or not SHIFT_POWERLAW.exists():
+        print("  skipped fig8 (shift-applied predictions not found)")
+        return
+
+    pred = pd.read_csv(SHIFT_APPLIED)
+    params_json = json.loads(SHIFT_POWERLAW.read_text())
+
+    theta_vals = np.sort(pred["theta"].unique())
+    # pick up to 6 representative theta values
+    if len(theta_vals) > 6:
+        idxs = np.linspace(0, len(theta_vals) - 1, 6, dtype=int)
+        theta_vals = theta_vals[idxs]
+
+    vw_values  = np.sort(pred["v_w"].unique())
+    h_values   = np.sort(pred["H"].unique())
+    cmap       = mpl.colormaps["viridis"]
+    vw_colors_local  = {vw: cmap(i / max(len(vw_values) - 1, 1)) for i, vw in enumerate(vw_values)}
+    marker_map = {1.0: "s", 1.5: "^", 2.0: "D", 0.5: "o"}
+
+    ncols = 3
+    nrows = int(np.ceil(len(theta_vals) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5.5 * ncols, 4.5 * nrows))
+    axes = np.array(axes).flatten()
+    fig.suptitle(
+        r"All-$v_w$ collapse after effective-time shift  "
+        r"($x_{\rm eff} = s(t_p, v_w)\cdot t_p H_*^\beta$)",
+        fontsize=12, y=1.01
+    )
+
+    # load baseline model for overlay
+    model_path = ROOT / "results_tosc_lattice_vw0p9_H1p0H1p5H2p0" / "collapse_and_fit_fanh" / "global_fit.json"
+    model = json.loads(model_path.read_text()) if model_path.exists() else None
+
+    for i, theta in enumerate(theta_vals):
+        ax = axes[i]
+        sub = pred[np.isclose(pred["theta"], theta, atol=5e-4)].copy()
+
+        for vw in vw_values:
+            for H in h_values:
+                cur = sub[
+                    np.isclose(sub["v_w"], vw, atol=1e-9) &
+                    np.isclose(sub["H"], H, atol=1e-9)
+                ].sort_values("x_eff")
+                if cur.empty:
+                    continue
+                ax.scatter(cur["x_eff"], cur["xi"],
+                           s=18, color=vw_colors_local[vw],
+                           marker=marker_map.get(H, "o"), alpha=0.80)
+
+        # FANH baseline model curve
+        if model is not None:
+            finf_map_m = {float(k): (float(v["value"]) if isinstance(v, dict) else float(v))
+                          for k, v in model["F_inf"].items()}
+            theta_keys = np.array(sorted(finf_map_m.keys()))
+            idx_th     = int(np.argmin(np.abs(theta_keys - float(theta))))
+            finf_th    = finf_map_m[theta_keys[idx_th]]
+
+            f0_sub = float(sub["F0"].iloc[0]) if not sub.empty else 1.0
+            x_range = sub["x_eff"].dropna()
+            if len(x_range) > 1:
+                xfine = np.geomspace(float(x_range.min()), float(x_range.max()), 300)
+                tc, r = float(model["t_c"]), float(model["r"])
+                xi_model = xfine**1.5 * finf_th / f0_sub**2 + 1.0 / (1.0 + (xfine / tc)**r)
+                ax.plot(xfine, xi_model, "k-", lw=1.8, zorder=5, label="FANH model")
+
+        ax.set_xscale("log"); ax.set_yscale("log")
+        ax.grid(alpha=0.2)
+        ax.set_title(rf"$\theta_0 = {theta:.3f}$", fontsize=9)
+        ax.set_xlabel(r"$x_{\rm eff}$", fontsize=9)
+        ax.set_ylabel(r"$\xi$", fontsize=9)
+        ax.tick_params(labelsize=7)
+        if i == 0:
+            ax.plot([], [], "k-", lw=1.8, label="FANH model")
+
+    # shared legend for vw colours
+    vw_handles = [mpl.lines.Line2D([0], [0], color=vw_colors_local[vw], lw=2.0,
+                                    label=rf"$v_w={vw:.1f}$") for vw in vw_values]
+    h_handles  = [mpl.lines.Line2D([0], [0], color="grey", marker=marker_map.get(H, "o"),
+                                    linestyle="None", ms=6, label=rf"$H_*={H:g}$")
+                  for H in h_values]
+    fig.legend(handles=vw_handles + h_handles,
+               loc="lower center", ncol=len(vw_values) + len(h_values),
+               frameon=False, fontsize=8.5, bbox_to_anchor=(0.5, -0.03))
+
+    for j in range(i + 1, len(axes)):
+        axes[j].set_visible(False)
+
+    fig.tight_layout()
+    fig.savefig(OUTDIR / outname, dpi=DPI, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  saved {outname}")
+
+
+def make_residual_comparison(outname="fig9_residual_comparison.png"):
+    """
+    Fig 9 — fractional residual (xi_pred - xi)/xi for each vw,
+    comparing: baseline (no shift) vs shift model.
+    2-row × 4-col layout.  Residuals vs x = tp H*^beta.
+    Inset bar chart shows global rel-RMSE improvement.
+    """
+    if not SHIFT_APPLIED.exists():
+        print("  skipped fig9 (shift-applied predictions not found)")
+        return
+
+    pred = pd.read_csv(SHIFT_APPLIED)
+    vw_values = np.sort(pred["v_w"].unique())
+
+    fig, axes = plt.subplots(2, 4, figsize=(16, 7),
+                              gridspec_kw={"height_ratios": [1, 1]},
+                              sharex=False, sharey=False)
+    fig.suptitle(
+        r"Fractional residual $(\xi_{\rm pred} - \xi)/\xi$ — baseline vs shift model",
+        fontsize=12
+    )
+
+    rmse_baseline, rmse_shift = [], []
+
+    for col, vw in enumerate(vw_values):
+        sub = pred[np.isclose(pred["v_w"], vw, atol=1e-9)].copy()
+        x   = sub["x_base"].to_numpy()
+        res_base  = sub["frac_resid_baseline"].to_numpy()
+        res_shift = sub["frac_resid_shift"].to_numpy()
+        good = np.isfinite(x) & np.isfinite(res_base) & np.isfinite(res_shift) & (x > 0)
+
+        rmse_b = float(np.sqrt(np.mean(np.square(res_base[good]))))
+        rmse_s = float(np.sqrt(np.mean(np.square(res_shift[good]))))
+        rmse_baseline.append(rmse_b)
+        rmse_shift.append(rmse_s)
+
+        h_vals = np.sort(sub["H"].unique())
+        cmap_h = mpl.colormaps["plasma"]
+        hcolors = {H: cmap_h(i / max(len(h_vals) - 1, 1)) for i, H in enumerate(h_vals)}
+        mk = {1.0: "s", 1.5: "^", 2.0: "D", 0.5: "o"}
+
+        for row, (res_col, label, rmse) in enumerate([
+            (res_base,  "baseline", rmse_b),
+            (res_shift, "shift",    rmse_s),
+        ]):
+            ax = axes[row, col]
+            for H in h_vals:
+                hmask = good & np.isclose(sub["H"].to_numpy(), H, atol=1e-9)
+                ax.scatter(x[hmask], res_col[hmask],
+                           s=14, color=hcolors[H], marker=mk.get(H, "o"),
+                           alpha=0.50, label=rf"$H_*={H:g}$")
+            ax.axhline(0.0, color="black", lw=1.0, ls="--", alpha=0.7)
+            ax.set_xscale("log")
+            ax.grid(alpha=0.20)
+            ax.tick_params(labelsize=7)
+            if row == 0:
+                ax.set_title(rf"$v_w = {vw}$"
+                             + f"\nRMSE = {rmse_b*100:.1f}%", fontsize=9)
+            else:
+                ax.set_title(f"After shift\nRMSE = {rmse_s*100:.1f}%", fontsize=9)
+            if col == 0:
+                ax.set_ylabel(
+                    "baseline residual" if row == 0 else "shift residual",
+                    fontsize=8
+                )
+            if row == 1:
+                ax.set_xlabel(r"$x = t_p H_*^\beta$", fontsize=8)
+            if col == 0 and row == 0:
+                ax.legend(frameon=False, fontsize=6.5, loc="best")
+
+            # symmetric y-limit
+            ylim = min(np.nanpercentile(np.abs(res_col[good]), 98) * 1.3, 1.0)
+            ax.set_ylim(-ylim, ylim)
+
+    # ── bar chart inset: RMSE improvement ──
+    ax_bar = fig.add_axes([0.91, 0.38, 0.075, 0.52])
+    x_pos  = np.arange(len(vw_values))
+    width  = 0.35
+    ax_bar.bar(x_pos - width/2, [r * 100 for r in rmse_baseline],
+               width, label="baseline", color="#d62728", alpha=0.80)
+    ax_bar.bar(x_pos + width/2, [r * 100 for r in rmse_shift],
+               width, label="shift",    color="#1f77b4", alpha=0.80)
+    ax_bar.set_xticks(x_pos)
+    ax_bar.set_xticklabels([f"{vw:.1f}" for vw in vw_values], fontsize=7)
+    ax_bar.set_xlabel(r"$v_w$", fontsize=7)
+    ax_bar.set_ylabel("rel RMSE (%)", fontsize=7)
+    ax_bar.set_title("RMSE summary", fontsize=7)
+    ax_bar.legend(frameon=False, fontsize=6)
+    ax_bar.tick_params(labelsize=6)
+    ax_bar.grid(axis="y", alpha=0.3)
+
+    fig.tight_layout(rect=[0, 0, 0.90, 1.0])
+    fig.savefig(OUTDIR / outname, dpi=DPI, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  saved {outname}")
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -423,6 +710,15 @@ def main():
         make_all_vw_model_comparison(frames, fits)
     else:
         print("  skipped fig6 (no fit data)")
+
+    # Fig 7: s(tp, vw) function — inferred shift + fitted formula
+    make_s_tp_vw()
+
+    # Fig 8: all-vw collapse after applying the shift
+    make_shift_collapse()
+
+    # Fig 9: residual comparison baseline vs shift
+    make_residual_comparison()
 
     print(f"\nAll figures saved to {OUTDIR}/")
 

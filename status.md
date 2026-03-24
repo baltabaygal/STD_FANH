@@ -645,6 +645,11 @@ Old model-attempt outputs now live in:
 - `results_pointwise_shift_powerlaw_applied/final_summary.json`
 - `results_shift_width_correction/final_summary.json`
 
+**Supervisor presentation figures** (`present_project/`):
+- `fig7_s_tp_vw.png` — inferred s(tₚ, vw) scatter + fitted formula curves for each vw; right panel: s vs vw at three fixed tₚ quantiles (diamonds = binned data medians, lines = formula)
+- `fig8_shift_collapse.png` — all-vw data collapsed onto the FANH baseline via x_eff = s·tₚ·H*^β; one panel per θ₀
+- `fig9_residual_comparison.png` — 2-row×4-col residual comparison (baseline top, shift bottom) with bar-chart inset showing RMSE improvement by vw
+
 ---
 
 ## Next Reasonable Step
