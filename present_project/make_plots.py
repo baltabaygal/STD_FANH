@@ -313,18 +313,24 @@ def make_all_vw_model_comparison(frames, fits):
                    np.isclose(df["H"].to_numpy(), H, atol=1e-6)
             if not np.any(mask): continue
             pts = df[mask].sort_values("tp")
-            x = pts["tp"].to_numpy() * pts["H"].to_numpy() ** beta
-            xi = pts["xi"].to_numpy()
-            f0 = float(pts["F0"].iloc[0])
+            x   = pts["tp"].to_numpy() * pts["H"].to_numpy() ** beta
+            xi  = pts["xi"].to_numpy()
+            xi_err = pts["xi_sem"].to_numpy() if "xi_sem" in pts.columns else np.zeros_like(xi)
+            xi_err = np.where(np.isfinite(xi_err), xi_err, 0.0)
+            f0  = float(pts["F0"].iloc[0])
             good = np.isfinite(x) & np.isfinite(xi) & (x > 0) & (xi > 0)
 
-            xi_pred = x[good]**1.5 * finf_th / f0**2 + 1.0 / (1.0 + (x[good] / tc)**r)
+            xi_pred  = x[good]**1.5 * finf_th / f0**2 + 1.0 / (1.0 + (x[good] / tc)**r)
             residual = (xi_pred - xi[good]) / np.maximum(xi[good], 1e-12)
+            res_err  = xi_err[good] / np.maximum(xi[good], 1e-12)
 
-            ax_top.scatter(x[good], xi[good], s=16, marker=H_MARKERS[H],
-                           color=H_COLORS[H], alpha=0.8, label=rf"$H_*={H}$")
-            ax_bot.scatter(x[good], residual, s=16, marker=H_MARKERS[H],
-                           color=H_COLORS[H], alpha=0.8)
+            ax_top.errorbar(x[good], xi[good], yerr=xi_err[good],
+                            fmt=H_MARKERS[H], color=H_COLORS[H],
+                            ms=4, lw=0, elinewidth=1.2, capsize=2, alpha=0.85,
+                            label=rf"$H_*={H}$", zorder=3)
+            ax_bot.errorbar(x[good], residual, yerr=res_err,
+                            fmt=H_MARKERS[H], color=H_COLORS[H],
+                            ms=4, lw=0, elinewidth=1.2, capsize=2, alpha=0.85)
 
             all_x.extend(x[good].tolist())
             all_xi.extend(xi[good].tolist())
