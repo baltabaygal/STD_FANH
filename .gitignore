@@ -10,6 +10,10 @@ results_*/
 tmp_*/
 ode/analysis/results/
 
+# Presentation figures (generated — track only the script)
+present_project/*.png
+present_project/*.pdf
+
 # Julia package environments and depots (vendored tooling, not source)
 .julia_depot_pysr*/
 .juliapkg_project_pysr*/
