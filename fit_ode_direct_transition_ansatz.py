@@ -74,6 +74,13 @@ def load_table(path: Path) -> pd.DataFrame:
     return pd.DataFrame(arr[:, : len(cols)], columns=cols)
 
 
+def xi_scale_from_tp(tp: np.ndarray, t_osc: float) -> np.ndarray:
+    return np.power(
+        np.maximum((2.0 * np.asarray(tp, dtype=np.float64)) / max(3.0 * float(t_osc), 1.0e-18), 1.0e-18),
+        1.5,
+    )
+
+
 def load_data(paths: list[Path], t_osc: float) -> tuple[pd.DataFrame, np.ndarray]:
     frames = []
     for path in paths:
@@ -101,7 +108,7 @@ def load_data(paths: list[Path], t_osc: float) -> tuple[pd.DataFrame, np.ndarray
         .rename(columns={"fanh_noPT": "F0"})
     )
     df = df.merge(f0_map, on="theta", how="left")
-    df["fanh_model_data"] = df["xi"] * df["F0"] / np.maximum(np.power(df["tp"] / t_osc, 1.5), 1.0e-18)
+    df["fanh_model_data"] = df["xi"] * df["F0"] / np.maximum(xi_scale_from_tp(df["tp"].to_numpy(dtype=np.float64), t_osc), 1.0e-18)
     return df.sort_values(["H", "theta", "tp"]).reset_index(drop=True), theta_values
 
 
@@ -111,10 +118,7 @@ def estimate_finf_init(df: pd.DataFrame, theta_values: np.ndarray, t_osc: float)
         sub = df[np.isclose(df["theta"], float(theta), atol=1.0e-12)].sort_values("tp").copy()
         n_tail = max(5, int(math.ceil(0.10 * len(sub))))
         tail = sub.tail(n_tail)
-        coeff = tail["xi"].to_numpy(dtype=np.float64) / np.maximum(
-            np.power(tail["tp"].to_numpy(dtype=np.float64) / t_osc, 1.5),
-            1.0e-18,
-        )
+        coeff = tail["xi"].to_numpy(dtype=np.float64) / np.maximum(xi_scale_from_tp(tail["tp"].to_numpy(dtype=np.float64), t_osc), 1.0e-18)
         out[i] = max(float(np.median(coeff * np.square(tail["F0"].to_numpy(dtype=np.float64)))), 1.0e-8)
     return out
 
@@ -131,7 +135,7 @@ def model_eval(params: np.ndarray, df: pd.DataFrame, t_osc: float, theta_values:
     tp = df["tp"].to_numpy(dtype=np.float64)
     f0_sq = np.square(df["F0"].to_numpy(dtype=np.float64))
     theta_idx = df["theta_idx"].to_numpy(dtype=np.int64)
-    plateau = np.power(tp / t_osc, 1.5) * finf[theta_idx] / np.maximum(f0_sq, 1.0e-18)
+    plateau = xi_scale_from_tp(tp, t_osc) * finf[theta_idx] / np.maximum(f0_sq, 1.0e-18)
     transient = 1.0 / (1.0 + np.power(np.maximum(tp, 1.0e-18) / max(tc, 1.0e-18), r))
     return plateau + transient
 
@@ -258,16 +262,15 @@ def bootstrap_fit(df: pd.DataFrame, theta_values: np.ndarray, fit_bundle: dict, 
 
 
 def fanh_model(tp: np.ndarray, f0: float, finf: float, t_osc: float, tc: float, r: float) -> np.ndarray:
-    return finf / f0 + f0 / (
-        np.power(np.maximum(tp / t_osc, 1.0e-18), 1.5)
-        * (1.0 + np.power(np.maximum(tp, 1.0e-18) / max(tc, 1.0e-18), r))
-    )
+    return finf / f0 + f0 / (xi_scale_from_tp(tp, t_osc) * (1.0 + np.power(np.maximum(tp, 1.0e-18) / max(tc, 1.0e-18), r)))
 
 
 def plot_xi_by_H(df: pd.DataFrame, payload: dict, t_osc: float, outdir: Path) -> None:
+    tp_plot_min = 1.0e-4
     for h in sorted(df["H"].unique()):
         sub_h = df[np.isclose(df["H"], float(h), atol=1.0e-12)].copy()
         theta_values = np.sort(sub_h["theta"].unique())
+        tp_plot_max = float(sub_h["tp"].max()) * 1.05
         fig, axes = plt.subplots(2, 3, figsize=(14.0, 8.0), sharex=False, sharey=False)
         for ax, theta in zip(axes.flat, theta_values):
             sub = sub_h[np.isclose(sub_h["theta"], float(theta), atol=1.0e-12)].sort_values("tp").copy()
@@ -275,9 +278,16 @@ def plot_xi_by_H(df: pd.DataFrame, payload: dict, t_osc: float, outdir: Path) ->
             xi = sub["xi"].to_numpy(dtype=np.float64)
             f0 = float(sub["F0"].iloc[0])
             finf = float(payload["F_inf"][f"{float(theta):.10f}"])
+            tp_curve = np.geomspace(tp_plot_min, max(tp_plot_max, tp_plot_min * 10.0), 500)
+            xi_curve = xi_scale_from_tp(tp_curve, t_osc) * finf / max(f0 * f0, 1.0e-18) + 1.0 / (
+                1.0 + np.power(tp_curve / payload["t_c"], payload["r"])
+            )
             ax.plot(tp, xi, "o", ms=3.2, color="tab:blue", label="ODE data")
-            ax.plot(tp, np.power(tp / t_osc, 1.5) * finf / max(f0 * f0, 1.0e-18) + 1.0 / (1.0 + np.power(tp / payload["t_c"], payload["r"])), lw=2.0, color="black", label="ansatz fit")
+            ax.plot(tp_curve, xi_curve, lw=2.0, color="black", label="ansatz fit")
             ax.set_xscale("log")
+            ax.set_yscale("log")
+            ax.set_xlim(tp_plot_min, tp_plot_max)
+            ax.axhline(1.0, color="tab:red", lw=1.1, ls="--", alpha=0.8, label=r"$\xi=1$")
             ax.grid(alpha=0.25)
             ax.set_title(rf"$\theta={theta:.3f}$")
             ax.set_xlabel(r"$t_p$")
@@ -350,7 +360,7 @@ def main() -> None:
             },
             "fit": payload,
             "bootstrap": boot,
-            "note": "Pure direct-ODE fit of xi(tp) = (tp/t_osc)^(3/2) F_inf/F0^2 + 1/(1 + (tp/t_c)^r), with shared t_c,r and per-theta F_inf.",
+            "note": "Pure direct-ODE fit of xi(tp) = (2 tp / (3 t_osc))^(3/2) F_inf/F0^2 + 1/(1 + (tp/t_c)^r), with shared t_c,r and per-theta F_inf.",
         }
         save_json(outdir / "final_summary.json", summary)
         print(json.dumps(summary, sort_keys=True))

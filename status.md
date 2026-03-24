@@ -23,6 +23,59 @@ This is the PT-modified anharmonic factor up to the fixed factor
 f_{\rm anh}^{\rm PT}(\theta_0,t_p) = (1.5)^{3/2} Y_2(\theta_0,t_p).
 \]
 
+## Conventions
+
+For this project, the canonical form for the lattice/ODE transition fits is
+
+\[
+\xi(\theta_0,t_p) =
+\left(\frac{2\,t_p}{3\,t_{\rm osc}}\right)^{3/2}
+\frac{\tilde f(\theta_0,t_p)}{F_0(\theta_0)}.
+\]
+
+Use this `\tilde f` parameterization as the primary one in all discussion and fitting code.
+Do not treat the additive `\xi = \text{plateau} + \text{transient}` form as the canonical model statement.
+
+This prefactor is the scale-factor ratio
+
+\[
+\left(\frac{a_p}{a_{\rm osc}}\right)^3
+\]
+
+with
+
+\[
+a \propto \sqrt{2Ht}
+\quad\text{and}\quad
+3H_{\rm osc}=m_\phi,
+\]
+
+so the canonical prefactor is
+
+\[
+\left(\frac{a_p}{a_{\rm osc}}\right)^3
+=
+\left(\frac{2\,t_p}{3\,t_{\rm osc}}\right)^{3/2}.
+\]
+
+For the current transition kernel, the corresponding `\tilde f` ansatz is
+
+\[
+\tilde f(\theta_0,t_p) =
+f_\infty(\theta_0)
++
+\frac{F_0(\theta_0)}
+{\left(\frac{2\,t_p}{3\,t_{\rm osc}}\right)^{3/2}\left[1+\left(\frac{t_p}{t_c}\right)^r\right]},
+\]
+
+with
+
+\[
+f_\infty(\theta_0) \equiv \frac{F_\infty(\theta_0)}{F_0(\theta_0)}.
+\]
+
+or the same expression multiplied by an explicit calibration factor only if that factor is intentionally included in the model.
+
 ## What Was Tried
 
 ### 1. Fixed-`t_p` angular-shape fits
@@ -614,6 +667,54 @@ Old model-attempt outputs now live in:
 
 ---
 
+### 15. ODE-anchored lattice fitting: fixing F_inf from ODE, per-(θ₀,vw) tc
+
+**Strategy**: instead of letting F_inf(θ₀) float freely in lattice fits, extract them from the direct ODE scan and freeze them, so the lattice fit only adjusts the transient parameters (β, tc, r). This connects the lattice model directly to first-principles ODE physics.
+
+**Step 1 — ODE direct fit** (`fit_ode_direct_transition_ansatz.py`, H* = 0.5, 1, 1.5, 2):
+Model: `xi = (2tp/3t_osc)^(3/2) · F_inf(θ)/F0² + 1/(1 + (tp/tc)^r)`, shared tc and r, per-θ₀ F_inf.
+Result: **tc → 50 (boundary), r = 0.56** — ODE transient is extremely slow; tc rails at the upper bound. Per-θ₀ F_inf values extracted for use in lattice fits.
+
+**Step 2 — ODE-fixed amplitudes on lattice** (`fit_lattice_fixed_ode_amplitudes.py`, vw=0.9, H*=1,1.5,2):
+
+| Case | β | tc | r | rel_rmse |
+|------|---|----|---|----------|
+| free_tc | **−0.212** | 2.23 | 3.12 | **3.4%** |
+| free_tc + calib (c) | −0.136 | 2.20 | 4.09 | 3.3% |
+| fixed tc=1.5 | −0.263 | 1.5 | 12.0 | 4.2% |
+| fixed tc=1.5 + calib | −0.102 | 1.5 | 20(rail) | 3.5% |
+
+Reference (free F_inf): β=−0.095, tc=2.22, r=2.13, rel_rmse=**0.7%**. Fixing ODE amplitudes costs ~5× accuracy — ODE and lattice F_inf differ by a systematic factor ~1.2 across all θ₀.
+
+**Step 3 — Per-θ₀ tc, shared r** (`fit_lattice_fixed_ode_amplitudes_theta_tc.py`): allows tc(θ₀) to vary per angular slice.
+
+**Step 4 — Free F_inf per (θ₀, vw), shared r** (`fit_lattice_theta_tc_shared_r_free_finf_by_vw.py`):
+Most complete model: per-(θ₀,vw) tc, shared r=2.78, free F_inf per θ₀.
+
+| vw | rel_rmse |
+|----|----------|
+| 0.3 | 4.0% |
+| 0.5 | 2.7% |
+| 0.7 | 1.9% |
+| 0.9 | 2.3% |
+| **global** | **2.9%** |
+
+tc(θ₀,vw) structure: tc increases with θ₀ (hilltop takes longer to transition) and with lower vw (slow walls → delayed transient), e.g. θ₀≈0.26: tc=0.97 (vw=0.9) → 1.81 (vw=0.3).
+
+**Step 5 — (θ₀,vw)-dependent F_inf tests** (`fit_lattice_theta_tc_shared_r_free_finf_vwtheta_tests.py`):
+Benchmark (shared r, F_inf per θ₀+vw): global rel_rmse = **1.9%**, per vw: 2.6% / 2.1% / 1.3% / 1.4%.
+Variant with (θ₀,vw)-dependent F_inf but fixed t_osc: global 2.7% — using F_inf(θ₀,vw) alone (without per-vw tc) does not improve over the benchmark. The tc(θ₀,vw) variation is the dominant driver.
+
+**Interpretation**: The transient timescale tc depends on both θ₀ and vw in a physically motivated way. F_inf from ODE is systematically ~20% below lattice values (lattice/ODE ratio ~1.2–1.4, increasing toward hilltop), indicating a real lattice vs ODE amplitude discrepancy. The best current model (benchmark, step 5) achieves 1.9% global RMSE across all vw — similar in quality to the pointwise shift pipeline (1.6%) but with a more interpretable model structure.
+
+**Key outputs**:
+- `results_ode_direct_transition_ansatz/final_summary.json`
+- `results_lattice_fixed_ode_amplitudes_vw0p9_H1p0H1p5H2p0/final_summary.json`
+- `results_lattice_theta_tc_sharedr_free_finf_by_vw_beta0_tcmax300/final_summary.json`
+- `results_lattice_theta_tc_sharedr_free_finf_vwtheta_tests_beta0_tcmax300/final_summary.json`
+
+---
+
 ### 14. Pointwise shift pipeline: all-vw universality via s(tₚ, vw)
 
 **What was done** (4-script pipeline):
@@ -652,13 +753,488 @@ Old model-attempt outputs now live in:
 
 ---
 
+### 15. Shared-`r` lattice fits across all `v_w` with `t_c(\theta_0; v_w)` (March 24, 2026)
+
+Tested a joint lattice fit across `v_w = 0.3, 0.5, 0.7, 0.9` with:
+
+- fixed `\beta = 0`, so `x = t_p`
+- one shared global `r`
+- free `t_c(\theta_0; v_w)`
+- ODE-fixed `F_0(\theta_0)`
+- transient kernel
+
+\[
+\frac{1}{1 + (t_p/t_c)^r}
+\]
+
+as the default working form
+
+#### 15a. ODE-fixed `F_\infty(\theta_0)`, `c_{calib}=1`
+
+Result:
+
+- relative RMSE `3.8710e-02`
+- `r = 1.9956`
+
+Behavior:
+
+- the hilltop `t_c` values ran to the imposed upper bound for several slices
+- the worst saturation was at large `\theta_0`, especially for higher `v_w`
+
+Interpretation:
+
+- this was the first clear sign that the large-`\theta_0` turnover is weakly constrained if the plateau is held fixed too rigidly
+
+Key output:
+
+- `results_lattice_fixed_ode_amplitudes_theta_tc_sharedr_by_vw_beta0_tcmax300/final_summary.json`
+
+#### 15b. ODE-fixed `F_\infty(\theta_0)`, free `c_{calib}(v_w)`
+
+Result:
+
+- relative RMSE `1.9424e-02`
+- `r = 2.2287`
+- `c_{calib}(v_w) = {0.3: 1.1217, 0.5: 1.0801, 0.7: 1.0022, 0.9: 0.9912}`
+
+Behavior:
+
+- this is the best-performing shared-`r` fit tried in this round
+- hilltop `t_c` saturation was reduced but not eliminated: the largest `\theta_0` point still wanted `t_c > 300` for `v_w = 0.7, 0.9`
+
+Interpretation:
+
+- allowing a simple per-`v_w` normalization absorbs much of the mismatch while keeping the ODE plateau shape fixed
+
+Key outputs:
+
+- `results_lattice_fixed_ode_amplitudes_theta_tc_sharedr_by_vw_beta0_tcmax300/collapse_overlay_sharedr_calib.png`
+- `results_lattice_fixed_ode_amplitudes_theta_tc_sharedr_by_vw_beta0_tcmax300/tc_by_vw_sharedr_calib.png`
+- `results_lattice_fixed_ode_amplitudes_theta_tc_sharedr_by_vw_beta0_tcmax300/final_summary.json`
+
+#### 15c. Failed alternative kernel
+
+Tested the shifted kernel
+
+\[
+\frac{1}{(1 + t_p/t_c)^r}
+\]
+
+instead of
+
+\[
+\frac{1}{1 + (t_p/t_c)^r}.
+\]
+
+Result:
+
+- calibrated relative RMSE degraded to `2.8858e-02`
+- fitted `r` jumped to `19.626`
+- hilltop `t_c` saturation remained
+
+Conclusion:
+
+- rejected
+- the blow-up problem was not caused by using the wrong kernel
+- the preferred kernel remains
+
+\[
+\frac{1}{1 + (t_p/t_c)^r}
+\]
+
+#### 15d. `c_{calib}=1` and free lattice-fit `F_\infty(\theta_0)`
+
+To test whether the ODE plateau itself was too low, refit with:
+
+- ODE-fixed `F_0(\theta_0)`
+- free lattice `F_\infty(\theta_0)`
+- shared `r`
+- free `t_c(\theta_0; v_w)`
+- no `c_{calib}`
+
+Result:
+
+- relative RMSE improved from `3.8710e-02` to `2.8755e-02`
+- `r = 2.7787`
+- all fitted `t_c(\theta_0; v_w)` values stayed finite, roughly `0.97` to `3.12`
+
+Fitted plateau shift:
+
+- `F_\infty^{lattice} / F_\infty^{ODE} = [1.203, 1.214, 1.233, 1.257, 1.285, 1.418]`
+
+Interpretation:
+
+- part of the earlier `t_c` blow-up was compensating for an ODE plateau that was systematically too low
+- freeing `F_\infty(\theta_0)` removes the runaway `t_c` behavior
+- however, this still does not beat the simpler ODE-fixed + free-`c_{calib}(v_w)` fit
+
+Conclusion:
+
+- best fit quality in this family: ODE-fixed `F_\infty` with free `c_{calib}(v_w)`
+- best fit with `c_{calib}=1`: free lattice `F_\infty(\theta_0)`
+
+Key outputs:
+
+- `results_lattice_theta_tc_sharedr_free_finf_by_vw_beta0_tcmax300/collapse_overlay_sharedr_free_finf.png`
+- `results_lattice_theta_tc_sharedr_free_finf_by_vw_beta0_tcmax300/tc_by_vw_sharedr_free_finf.png`
+- `results_lattice_theta_tc_sharedr_free_finf_by_vw_beta0_tcmax300/f_infty_theta_sharedr_free_finf.png`
+- `results_lattice_theta_tc_sharedr_free_finf_by_vw_beta0_tcmax300/final_summary.json`
+- `results_lattice_theta_tc_sharedr_free_finf_by_vw_beta0_tcmax300/comparison_sheet.png`
+
+#### 15e. Cleanup performed
+
+Removed after the comparison was recorded in `comparison_sheet.png`:
+
+- failed shifted-kernel output directory `results_lattice_fixed_ode_amplitudes_theta_tc_sharedr_by_vw_beta0_tcmax300_shifted`
+- stale aggregate error file `results_lattice_fixed_ode_amplitudes_theta_tc_by_vw_beta0_tcmax100/_error.json`
+
+#### 15f. Testing explicit `H_*` corrections in the shared-`r`, free-`f_\infty`, `c_{calib}=1` family
+
+Starting point:
+
+- baseline model kept the canonical form
+
+\[
+\xi = \left(\frac{x}{t_{\rm osc}}\right)^{3/2} \frac{\tilde f}{F_0},
+\qquad
+\tilde f = f_\infty(\theta_0) + \frac{F_0(\theta_0)}{\left(\frac{x}{t_{\rm osc}}\right)^{3/2}\left[1 + \left(\frac{x}{t_c}\right)^r\right]}
+\]
+
+with:
+
+- shared `r`
+- free `t_c(\theta_0; v_w)`
+- free lattice `f_\infty(\theta_0)`
+- fixed `\beta = 0`
+- no `c_{calib}`
+
+Question:
+
+- does the remaining bad `H_* = 2.0` behavior come from a missing explicit `H_*` correction?
+
+Baseline diagnostic:
+
+- yes, `H_* = 2.0` remains the worst slice
+- mean raw RMSE by `H_*`:
+  - `H_* = 1.0`: `2.6225e-02`
+  - `H_* = 1.5`: `2.0805e-02`
+  - `H_* = 2.0`: `3.0864e-02`
+- worst subgroup was `H_* = 2.0, v_w = 0.3` with mean raw RMSE `5.1074e-02`
+
+Two one-parameter extensions were tested:
+
+1. timing-only correction
+
+\[
+t_c \to t_c(\theta_0; v_w)\,H_*^{\alpha_{tc}}
+\]
+
+2. amplitude correction
+
+\[
+\tilde f \to H_*^\gamma \tilde f
+\]
+
+Results:
+
+- baseline:
+  - relative RMSE `2.8755e-02`
+  - `r = 2.7787`
+- timing-only `t_c H_*^{\alpha_{tc}}`:
+  - relative RMSE `2.7058e-02`
+  - `r = 3.2082`
+  - `\alpha_{tc} = -0.2001`
+- amplitude-only `H_*^\gamma`:
+  - relative RMSE `2.8726e-02`
+  - `r = 2.6985`
+  - `\gamma = 6.33 \times 10^{-3}`
+
+Interpretation:
+
+- the amplitude-shift test is effectively null: `\gamma` is driven to zero and the fit quality is unchanged
+- the timing-only `t_c H_*^{\alpha_{tc}}` correction helps the global fit and improves `H_* = 1.0`, but it does **not** fix the `H_* = 2.0` problem
+- mean raw RMSE at `H_* = 2.0` stayed essentially flat:
+  - baseline: `3.0864e-02`
+  - timing-only: `3.0826e-02`
+  - amplitude-only: `3.0616e-02`
+- in particular, the worst subgroup `H_* = 2.0, v_w = 0.3` did not improve:
+  - baseline: `5.1074e-02`
+  - timing-only: `5.2718e-02`
+  - amplitude-only: `4.9613e-02`
+
+Conclusion:
+
+- there is still a real high-`H_*` tension in the `c_{calib}=1`, free-`f_\infty`, shared-`r` model
+- a global amplitude factor `H_*^\gamma` does not explain it
+- a simple power-law timing correction `t_c \propto H_*^{\alpha_{tc}}` is not enough to resolve it either
+
+Key outputs:
+
+- `results_lattice_theta_tc_sharedr_hstar_tests_beta0_tcmax300/comparison_sheet.png`
+- `results_lattice_theta_tc_sharedr_hstar_tests_beta0_tcmax300/rmse_by_h.png`
+- `results_lattice_theta_tc_sharedr_hstar_tests_beta0_tcmax300/rmse_by_h_vw.png`
+- `results_lattice_theta_tc_sharedr_hstar_tests_beta0_tcmax300/baseline/xi_vs_betaH_H2p0.png`
+- `results_lattice_theta_tc_sharedr_hstar_tests_beta0_tcmax300/tc_hpow/xi_vs_betaH_H2p0.png`
+- `results_lattice_theta_tc_sharedr_hstar_tests_beta0_tcmax300/gamma_amp/xi_vs_betaH_H2p0.png`
+- `results_lattice_theta_tc_sharedr_hstar_tests_beta0_tcmax300/final_summary.json`
+
+#### 15g. Rechecking the earlier good collapse and testing `t_{osc}` / full-time rescaling
+
+Motivation:
+
+- the earlier well-collapsing multi-`v_w` fit was the ODE-fixed `f_\infty(\theta_0)` model with free `c(v_w)`
+- the later `c_{calib}=1`, free-lattice-`f_\infty(\theta_0)` fit was visibly worse at high `H_*`
+- this raised two follow-up tests:
+  1. keep the earlier calibrated ODE-fixed model, but fit a global `t_{osc}`
+  2. try an alternate parametrization where `s(v_w,\theta_0) = 1/t_c(v_w,\theta_0)` is promoted to a direct time-rescaling factor and is applied to every `t_p` entering the ansatz
+
+Canonical calibrated baseline rechecked:
+
+- model: ODE-fixed `f_\infty(\theta_0)`, free `c(v_w)`, free `t_c(\theta_0;v_w)`, shared `r`, fixed `t_{osc}=1.5`
+- result reproduced exactly:
+  - relative RMSE `1.9424e-02`
+  - `r = 2.2287`
+  - `c(v_w) = {0.3: 1.1217, 0.5: 1.0801, 0.7: 1.0022, 0.9: 0.9912}`
+- mean raw RMSE by `H_*`:
+  - `H_*=1.0`: `1.7770e-02`
+  - `H_*=1.5`: `1.8280e-02`
+  - `H_*=2.0`: `1.6801e-02`
+
+Conclusion:
+
+- the earlier good collapse was real
+- there was no serious residual `H_*=2` problem in this calibrated ODE-fixed family
+
+Free-`t_{osc}` test:
+
+- same model family, but with one extra global fit parameter `t_{osc}`
+- result:
+  - relative RMSE `1.9362e-02`
+  - `r = 2.0568`
+  - fitted `t_{osc} = 1.5430`
+  - `c(v_w) = {0.3: 1.1343, 0.5: 1.0899, 0.7: 1.0101, 0.9: 0.9988}`
+- mean raw RMSE by `H_*`:
+  - `H_*=1.0`: `1.7586e-02`
+  - `H_*=1.5`: `1.8184e-02`
+  - `H_*=2.0`: `1.6516e-02`
+
+Interpretation:
+
+- freeing `t_{osc}` helps slightly, but only slightly
+- the calibrated ODE-fixed fit was already near-optimal
+- the data mildly prefers `t_{osc} \simeq 1.54` over `1.5`, but this is a refinement, not a qualitative change
+
+Full-time `s(v_w,\theta_0)` rescaling test:
+
+- define `s(v_w,\theta_0)` and replace every `t_p` in the canonical ansatz by `s(v_w,\theta_0)\,t_p`
+- keep ODE-fixed `f_\infty(\theta_0)`, free `c(v_w)`, shared `r`
+- keep `t_{osc}=1.5` fixed in this test to avoid a near-degeneracy between a global `t_{osc}` and a pointwise time-rescaling field `s`
+
+Result:
+
+- this fit is much worse
+  - relative RMSE `8.0036e-02`
+  - `r = 1.2392`
+  - `c(v_w) = {0.3: 1.5007, 0.5: 1.4007, 0.7: 1.2784, 0.9: 1.2459}`
+- mean raw RMSE by `H_*`:
+  - `H_*=1.0`: `8.0484e-02`
+  - `H_*=1.5`: `3.8595e-02`
+  - `H_*=2.0`: `5.2504e-02`
+
+Pathology:
+
+- the fitted `s(v_w,\theta_0)` grid hit the lower bound `10^{-4}` for `\theta_0 = 2.3562` across all `v_w`
+- equivalently, `t_c^{equiv} = 1/s` ran to `10^4` there
+
+Interpretation:
+
+- applying the same local time-rescaling factor to both the prefactor `(t_p/t_{osc})^{3/2}` and the transition denominator overconstrains the model
+- the fit then tries to turn the rescaling off at large `\theta_0` by driving `s` to its floor
+- this is strong evidence that the canonical ansatz does **not** want a uniform pointwise time remapping of all `t_p` entries
+
+Conclusion:
+
+- keep the calibrated ODE-fixed family as the preferred multi-`v_w` collapse model
+- if desired, allow a free global `t_{osc}`: the best-fit value is `t_{osc} \simeq 1.54`
+- reject the "apply `s` to all `t_p`" variant in its current form
+
+Key outputs:
+
+- `results_lattice_theta_tc_tosc_and_s_tests_beta0_tcmax300/comparison_sheet.png`
+- `results_lattice_theta_tc_tosc_and_s_tests_beta0_tcmax300/rmse_by_h.png`
+- `results_lattice_theta_tc_tosc_and_s_tests_beta0_tcmax300/rmse_by_h_vw.png`
+- `results_lattice_theta_tc_tosc_and_s_tests_beta0_tcmax300/calib_fixed_tosc/collapse_overlay.png`
+- `results_lattice_theta_tc_tosc_and_s_tests_beta0_tcmax300/calib_free_tosc/collapse_overlay.png`
+- `results_lattice_theta_tc_tosc_and_s_tests_beta0_tcmax300/s_alltp/collapse_overlay.png`
+- `results_lattice_theta_tc_tosc_and_s_tests_beta0_tcmax300/calib_fixed_tosc/xi_vs_betaH_H2p0.png`
+- `results_lattice_theta_tc_tosc_and_s_tests_beta0_tcmax300/calib_free_tosc/xi_vs_betaH_H2p0.png`
+- `results_lattice_theta_tc_tosc_and_s_tests_beta0_tcmax300/s_alltp/xi_vs_betaH_H2p0.png`
+- `results_lattice_theta_tc_tosc_and_s_tests_beta0_tcmax300/final_summary.json`
+
+#### 15h. Boundary-consistent replacement of `c(v_w)` by `f_\infty(\theta_0,v_w)`
+
+Motivation:
+
+- the calibrated ODE-fixed model with free `c(v_w)` fits best, but violates the exact early-time condition
+
+\[
+\xi(t_p \to 0) \to 1
+\]
+
+because it gives `\xi \to c(v_w)` instead
+- to keep the boundary condition exact while still allowing `v_w`-dependent late-time behavior, replace the scalar normalization by a direct fit of the plateau
+
+\[
+\tilde f
+=
+f_\infty(\theta_0,v_w)
++
+\frac{F_0^{ODE}(\theta_0)}
+{\left(\frac{x}{t_{osc}}\right)^{3/2}\left[1+\left(\frac{x}{t_c(\theta_0,v_w)}\right)^r\right]}
+\]
+
+with `c=1`
+
+Tested variants:
+
+1. fixed `t_{osc}=1.5`
+2. free global `t_{osc}`
+
+Benchmark for comparison:
+
+- calibrated ODE-fixed model with free `c(v_w)` and free `t_{osc}`
+- relative RMSE `1.9362e-02`
+- `r = 2.0568`
+- `t_{osc} = 1.5430`
+
+Results for the new boundary-consistent model:
+
+- fixed `t_{osc}`:
+  - relative RMSE `2.6686e-02`
+  - `r = 3.0059`
+- free `t_{osc}`:
+  - relative RMSE `2.6686e-02`
+  - `r = 3.0058`
+  - `t_{osc} = 1.5215`
+
+Interpretation:
+
+- allowing `f_\infty(\theta_0,v_w)` does improve substantially over the older `c=1`, `f_\infty(\theta_0)`-only model
+- but it does **not** recover the fit quality of the calibrated benchmark
+- freeing `t_{osc}` on top of `f_\infty(\theta_0,v_w)` is nearly irrelevant: the fixed/free `t_{osc}` runs are numerically almost identical
+
+High-`H_*` behavior:
+
+- benchmark mean raw RMSE by `H_*`:
+  - `H_*=1.0`: `1.7586e-02`
+  - `H_*=1.5`: `1.8184e-02`
+  - `H_*=2.0`: `1.6516e-02`
+- new `f_\infty(\theta_0,v_w)` model:
+  - `H_*=1.0`: `2.4291e-02`
+  - `H_*=1.5`: `1.7858e-02`
+  - `H_*=2.0`: `2.7041e-02`
+
+So:
+
+- this boundary-consistent model improves the middle `H_*=1.5` slice a bit relative to its own `H_*=1.0` and `H_*=2.0`
+- but it still leaves a visible high-`H_*` tension and is worse than the calibrated benchmark at `H_*=2.0`
+
+Fitted plateau behavior:
+
+- `f_\infty(\theta_0,v_w)` develops substantial `v_w` dependence
+- for low and moderate `\theta_0`, the fitted plateau is generally above ODE for all `v_w`
+- at larger `\theta_0`, the high-`v_w` plateaus can drop back toward or even below the ODE value, while low-`v_w` remains above it
+
+Conclusion:
+
+- if the early-time normalization must be exact, then fitting `f_\infty(\theta_0,v_w)` is a cleaner replacement for `c(v_w)` than multiplying the whole `\tilde f`
+- but empirically it still does not match the collapse quality of the calibrated ODE-fixed benchmark
+- in other words: the data mismatch absorbed by `c(v_w)` is not just a pure late-time plateau correction
+
+Key outputs:
+
+- `results_lattice_theta_tc_sharedr_free_finf_vwtheta_tests_beta0_tcmax300/comparison_sheet.png`
+- `results_lattice_theta_tc_sharedr_free_finf_vwtheta_tests_beta0_tcmax300/rmse_by_h.png`
+- `results_lattice_theta_tc_sharedr_free_finf_vwtheta_tests_beta0_tcmax300/vwtheta_fixed_tosc/collapse_overlay.png`
+- `results_lattice_theta_tc_sharedr_free_finf_vwtheta_tests_beta0_tcmax300/vwtheta_free_tosc/collapse_overlay.png`
+- `results_lattice_theta_tc_sharedr_free_finf_vwtheta_tests_beta0_tcmax300/vwtheta_fixed_tosc/f_infty_by_vw.png`
+- `results_lattice_theta_tc_sharedr_free_finf_vwtheta_tests_beta0_tcmax300/vwtheta_free_tosc/f_infty_by_vw.png`
+- `results_lattice_theta_tc_sharedr_free_finf_vwtheta_tests_beta0_tcmax300/vwtheta_fixed_tosc/xi_vs_betaH_H2p0.png`
+- `results_lattice_theta_tc_sharedr_free_finf_vwtheta_tests_beta0_tcmax300/vwtheta_free_tosc/xi_vs_betaH_H2p0.png`
+- `results_lattice_theta_tc_sharedr_free_finf_vwtheta_tests_beta0_tcmax300/final_summary.json`
+
+#### 15i. Prefactor consistency update: use `(2/3)` in the canonical `t_{osc}` prefactor
+
+To match the scale-factor interpretation,
+
+\[
+\left(\frac{a_p}{a_{\rm osc}}\right)^3
+=
+\left(\frac{2\,t_p}{3\,t_{\rm osc}}\right)^{3/2},
+\]
+
+the canonical prefactor was updated in the active ODE/lattice scripts from
+
+\[
+\left(\frac{t_p}{t_{\rm osc}}\right)^{3/2}
+\]
+
+to
+
+\[
+\left(\frac{2\,t_p}{3\,t_{\rm osc}}\right)^{3/2}.
+\]
+
+This was implemented in:
+
+- `fit_ode_direct_transition_ansatz.py`
+- `fit_lattice_fixed_ode_amplitudes_theta_tc_shared_r_by_vw.py`
+- `fit_lattice_theta_tc_tosc_and_s_tests.py`
+- `fit_lattice_theta_tc_shared_r_free_finf_vwtheta_tests.py`
+
+and string conventions were aligned in the related canonical-`\tilde f` scripts as well.
+
+Empirical effect:
+
+- in fits where `t_{osc}` is free, this is almost entirely absorbed by the fitted `t_{osc}` and leaves fit quality essentially unchanged
+- in the direct ODE fit, `t_c` and `r` remained essentially unchanged, while the fitted `F_\infty` values rescaled upward as expected
+
+Updated direct ODE fit:
+
+- `t_c = 50.0`
+- `r = 0.5602`
+- `F_\infty = [0.7158,\ 0.8011,\ 1.0110,\ 1.4681,\ 2.5723,\ 6.5449]`
+
+Updated calibrated ODE-fixed lattice benchmark with free global `t_{osc}`:
+
+- relative RMSE `1.9362e-02`
+- `r = 2.0570`
+- `t_{osc} = 1.5430`
+- `c(v_w) = {0.3: 1.1342, 0.5: 1.0899, 0.7: 1.0101, 0.9: 0.9988}`
+
+Updated boundary-consistent `f_\infty(\theta_0,v_w)` fit with free global `t_{osc}`:
+
+- relative RMSE `2.6686e-02`
+- `r = 3.0059`
+- `t_{osc} = 1.5216`
+
+Conclusion:
+
+- the prefactor update is the correct convention and should be used going forward
+- it does not change the qualitative model ranking
+- best current empirical fit still: ODE-fixed `f_\infty(\theta_0)` with free `c(v_w)` and free `t_{osc}`
+- best boundary-consistent alternative still: free `f_\infty(\theta_0,v_w)` with `c=1`, but it remains worse than the calibrated benchmark
+
+---
+
 ## Next Reasonable Step
 
 If we want a better semi-analytic closure, the next target is now split by use case:
 
 1. for the ODE `H_* = 1` compact description, keep the 7-parameter `c0 + c1/t_p^p` model as the repo default unless a cleaner derivation appears
-2. for the lattice comparison, keep `v_w = 0.9`, the fixed no-PT hilltop-log law, and treat the scalar negative amplitude exponent `\gamma \simeq -0.12` as the current best empirical `H_*` correction
-3. test whether that scalar `\gamma` is a real physical `H_*` amplitude dependence or is instead absorbing a remaining transition-shape mismatch in the PT sector
-4. keep the lower-`v_w` scalar-`\gamma` results as provisional only, because those fits still run to extreme `t_c`/`r` values and are not yet stable
+2. for the lattice comparison in the current canonical `\tilde f` shared-`r` family, do **not** prioritize a global `H_*^\gamma` amplitude correction: the dedicated test drove `\gamma \to 0`
+3. if an explicit `H_*` correction is still needed, it likely has to be more structured than either a single global `H_*^\gamma` factor or a single `t_c \propto H_*^{\alpha_{tc}}` power
+4. keep older lower-`v_w` scalar-`\gamma` results as provisional only, because they are not supported by the newer shared-`r`, free-`f_\infty`, canonical-`\tilde f` comparison
 5. ~~for multi-`v_w` universality: fit additive shift~~ → **DONE via multiplicative pointwise shift pipeline** (section 14). Global rel_rmse reduced from 7.2% → 1.6% with formula `s = 1 + 0.606·[(0.9/vw)^0.281 − 1]·tₚ^{−1.325}`
-6. Consider physical interpretation of the shift: the `tₚ^{−1.325}` decay means early-time (small tₚ) points are shifted most — consistent with slow walls (small vw) having larger fractional delay at the start of percolation. Could be tested against ODE-computed tₚ distributions.
+6. **ODE-anchored approach** (section 15) reaches ~1.9% global RMSE with per-(θ₀,vw) tc and shared r; next question is whether a smooth parametric formula `tc(θ₀, vw)` can be found (e.g. `tc ∝ (1/vw)^α · g(θ₀)`), which would reduce the parameter count while maintaining accuracy.
+7. The systematic ~20% discrepancy between lattice and ODE F_inf values needs investigation — could be a bubble nucleation geometry effect or a lattice-spacing artefact.

@@ -28,6 +28,7 @@ def parse_args():
     )
     p.add_argument("--fixed-vw", type=float, default=0.9)
     p.add_argument("--h-values", type=float, nargs="+", default=[1.0, 1.5, 2.0])
+    p.add_argument("--fixed-beta", type=float, default=None)
     p.add_argument("--t-osc", type=float, default=1.5)
     p.add_argument("--ode-summary", type=str, default=str(ODE_SUMMARY_DEFAULT))
     p.add_argument("--reference-summary", type=str, default=str(REFERENCE_SUMMARY_DEFAULT))
@@ -146,48 +147,82 @@ def model_eval(meta, beta, t_c, r, c_calib=1.0):
     return float(c_calib) * (plateau + transient)
 
 
-def residual_free(params, meta):
-    beta, t_c, r = [float(v) for v in params]
+def residual_free(params, meta, fixed_beta=None):
+    if fixed_beta is None:
+        beta, t_c, r = [float(v) for v in params]
+    else:
+        beta = float(fixed_beta)
+        t_c, r = [float(v) for v in params]
     y_fit = model_eval(meta, beta, t_c, r)
     return (y_fit - meta["xi"]) / np.maximum(meta["xi"], 1.0e-12)
 
 
-def residual_fixed_tc(params, meta, tc_fixed):
-    beta, r = [float(v) for v in params]
+def residual_fixed_tc(params, meta, tc_fixed, fixed_beta=None):
+    if fixed_beta is None:
+        beta, r = [float(v) for v in params]
+    else:
+        beta = float(fixed_beta)
+        r = float(params[0])
     y_fit = model_eval(meta, beta, tc_fixed, r)
     return (y_fit - meta["xi"]) / np.maximum(meta["xi"], 1.0e-12)
 
 
-def residual_free_calib(params, meta):
-    beta, t_c, r, c_calib = [float(v) for v in params]
+def residual_free_calib(params, meta, fixed_beta=None):
+    if fixed_beta is None:
+        beta, t_c, r, c_calib = [float(v) for v in params]
+    else:
+        beta = float(fixed_beta)
+        t_c, r, c_calib = [float(v) for v in params]
     y_fit = model_eval(meta, beta, t_c, r, c_calib=c_calib)
     return (y_fit - meta["xi"]) / np.maximum(meta["xi"], 1.0e-12)
 
 
-def residual_fixed_tc_calib(params, meta, tc_fixed):
-    beta, r, c_calib = [float(v) for v in params]
+def residual_fixed_tc_calib(params, meta, tc_fixed, fixed_beta=None):
+    if fixed_beta is None:
+        beta, r, c_calib = [float(v) for v in params]
+    else:
+        beta = float(fixed_beta)
+        r, c_calib = [float(v) for v in params]
     y_fit = model_eval(meta, beta, tc_fixed, r, c_calib=c_calib)
     return (y_fit - meta["xi"]) / np.maximum(meta["xi"], 1.0e-12)
 
 
-def fit_case(meta, fixed_tc=None):
+def fit_case(meta, fixed_tc=None, fixed_beta=None):
     if fixed_tc is None:
-        x0 = np.array([-0.05, 2.2, 2.2], dtype=np.float64)
-        lower = np.array([-0.5, 0.2, 0.1], dtype=np.float64)
-        upper = np.array([0.5, 10.0, 20.0], dtype=np.float64)
-        fun = lambda p: residual_free(p, meta)
+        if fixed_beta is None:
+            x0 = np.array([-0.05, 2.2, 2.2], dtype=np.float64)
+            lower = np.array([-0.5, 0.2, 0.1], dtype=np.float64)
+            upper = np.array([0.5, 10.0, 20.0], dtype=np.float64)
+        else:
+            x0 = np.array([2.2, 2.2], dtype=np.float64)
+            lower = np.array([0.2, 0.1], dtype=np.float64)
+            upper = np.array([10.0, 20.0], dtype=np.float64)
+        fun = lambda p: residual_free(p, meta, fixed_beta=fixed_beta)
     else:
-        x0 = np.array([-0.05, 2.2], dtype=np.float64)
-        lower = np.array([-0.5, 0.1], dtype=np.float64)
-        upper = np.array([0.5, 20.0], dtype=np.float64)
-        fun = lambda p: residual_fixed_tc(p, meta, fixed_tc)
+        if fixed_beta is None:
+            x0 = np.array([-0.05, 2.2], dtype=np.float64)
+            lower = np.array([-0.5, 0.1], dtype=np.float64)
+            upper = np.array([0.5, 20.0], dtype=np.float64)
+        else:
+            x0 = np.array([2.2], dtype=np.float64)
+            lower = np.array([0.1], dtype=np.float64)
+            upper = np.array([20.0], dtype=np.float64)
+        fun = lambda p: residual_fixed_tc(p, meta, fixed_tc, fixed_beta=fixed_beta)
 
     huber = least_squares(fun, x0, bounds=(lower, upper), loss="huber", f_scale=0.05, max_nfev=30000)
     final = least_squares(fun, huber.x, bounds=(lower, upper), loss="linear", max_nfev=30000)
     if fixed_tc is None:
-        beta, t_c, r = [float(v) for v in final.x]
+        if fixed_beta is None:
+            beta, t_c, r = [float(v) for v in final.x]
+        else:
+            beta = float(fixed_beta)
+            t_c, r = [float(v) for v in final.x]
     else:
-        beta, r = [float(v) for v in final.x]
+        if fixed_beta is None:
+            beta, r = [float(v) for v in final.x]
+        else:
+            beta = float(fixed_beta)
+            r = float(final.x[0])
         t_c = float(fixed_tc)
     y_fit = model_eval(meta, beta, t_c, r)
     frac_resid = (y_fit - meta["xi"]) / np.maximum(meta["xi"], 1.0e-12)
@@ -210,24 +245,42 @@ def fit_case(meta, fixed_tc=None):
     }
 
 
-def fit_case_calib(meta, fixed_tc=None):
+def fit_case_calib(meta, fixed_tc=None, fixed_beta=None):
     if fixed_tc is None:
-        x0 = np.array([-0.05, 2.2, 2.2, 1.0], dtype=np.float64)
-        lower = np.array([-0.5, 0.2, 0.1, 0.1], dtype=np.float64)
-        upper = np.array([0.5, 10.0, 20.0, 10.0], dtype=np.float64)
-        fun = lambda p: residual_free_calib(p, meta)
+        if fixed_beta is None:
+            x0 = np.array([-0.05, 2.2, 2.2, 1.0], dtype=np.float64)
+            lower = np.array([-0.5, 0.2, 0.1, 0.1], dtype=np.float64)
+            upper = np.array([0.5, 10.0, 20.0, 10.0], dtype=np.float64)
+        else:
+            x0 = np.array([2.2, 2.2, 1.0], dtype=np.float64)
+            lower = np.array([0.2, 0.1, 0.1], dtype=np.float64)
+            upper = np.array([10.0, 20.0, 10.0], dtype=np.float64)
+        fun = lambda p: residual_free_calib(p, meta, fixed_beta=fixed_beta)
     else:
-        x0 = np.array([-0.05, 2.2, 1.0], dtype=np.float64)
-        lower = np.array([-0.5, 0.1, 0.1], dtype=np.float64)
-        upper = np.array([0.5, 20.0, 10.0], dtype=np.float64)
-        fun = lambda p: residual_fixed_tc_calib(p, meta, fixed_tc)
+        if fixed_beta is None:
+            x0 = np.array([-0.05, 2.2, 1.0], dtype=np.float64)
+            lower = np.array([-0.5, 0.1, 0.1], dtype=np.float64)
+            upper = np.array([0.5, 20.0, 10.0], dtype=np.float64)
+        else:
+            x0 = np.array([2.2, 1.0], dtype=np.float64)
+            lower = np.array([0.1, 0.1], dtype=np.float64)
+            upper = np.array([20.0, 10.0], dtype=np.float64)
+        fun = lambda p: residual_fixed_tc_calib(p, meta, fixed_tc, fixed_beta=fixed_beta)
 
     huber = least_squares(fun, x0, bounds=(lower, upper), loss="huber", f_scale=0.05, max_nfev=30000)
     final = least_squares(fun, huber.x, bounds=(lower, upper), loss="linear", max_nfev=30000)
     if fixed_tc is None:
-        beta, t_c, r, c_calib = [float(v) for v in final.x]
+        if fixed_beta is None:
+            beta, t_c, r, c_calib = [float(v) for v in final.x]
+        else:
+            beta = float(fixed_beta)
+            t_c, r, c_calib = [float(v) for v in final.x]
     else:
-        beta, r, c_calib = [float(v) for v in final.x]
+        if fixed_beta is None:
+            beta, r, c_calib = [float(v) for v in final.x]
+        else:
+            beta = float(fixed_beta)
+            r, c_calib = [float(v) for v in final.x]
         t_c = float(fixed_tc)
     y_fit = model_eval(meta, beta, t_c, r, c_calib=c_calib)
     frac_resid = (y_fit - meta["xi"]) / np.maximum(meta["xi"], 1.0e-12)
@@ -251,7 +304,7 @@ def fit_case_calib(meta, fixed_tc=None):
     }
 
 
-def bootstrap_case(meta, fit_payload, nboot, n_jobs, fixed_tc=None):
+def bootstrap_case(meta, fit_payload, nboot, n_jobs, fixed_tc=None, fixed_beta=None):
     if nboot <= 0:
         return {"status": "skipped", "n_samples": 0}
     y_fit = fit_payload["y_fit"]
@@ -262,10 +315,12 @@ def bootstrap_case(meta, fit_payload, nboot, n_jobs, fixed_tc=None):
         boot_y = np.maximum(y_fit + resid[rng.integers(0, resid.size, size=resid.size)], 1.0e-12)
         boot_meta = dict(meta)
         boot_meta["xi"] = boot_y
-        payload = fit_case(boot_meta, fixed_tc=fixed_tc)
+        payload = fit_case(boot_meta, fixed_tc=fixed_tc, fixed_beta=fixed_beta)
         if not payload["success"]:
             return None
-        out = {"beta": payload["beta"], "r": payload["r"]}
+        out = {"r": payload["r"]}
+        if fixed_beta is None:
+            out["beta"] = payload["beta"]
         if fixed_tc is None:
             out["t_c"] = payload["t_c"]
         return out
@@ -282,10 +337,12 @@ def bootstrap_case(meta, fit_payload, nboot, n_jobs, fixed_tc=None):
             "p50": float(np.percentile(vals, 50)),
             "p84": float(np.percentile(vals, 84)),
         }
+    if fixed_beta is not None:
+        out["beta_fixed"] = float(fixed_beta)
     return out
 
 
-def bootstrap_case_calib(meta, fit_payload, nboot, n_jobs, fixed_tc=None):
+def bootstrap_case_calib(meta, fit_payload, nboot, n_jobs, fixed_tc=None, fixed_beta=None):
     if nboot <= 0:
         return {"status": "skipped", "n_samples": 0}
     y_fit = fit_payload["y_fit"]
@@ -296,10 +353,12 @@ def bootstrap_case_calib(meta, fit_payload, nboot, n_jobs, fixed_tc=None):
         boot_y = np.maximum(y_fit + resid[rng.integers(0, resid.size, size=resid.size)], 1.0e-12)
         boot_meta = dict(meta)
         boot_meta["xi"] = boot_y
-        payload = fit_case_calib(boot_meta, fixed_tc=fixed_tc)
+        payload = fit_case_calib(boot_meta, fixed_tc=fixed_tc, fixed_beta=fixed_beta)
         if not payload["success"]:
             return None
-        out = {"beta": payload["beta"], "r": payload["r"], "c_calib": payload["c_calib"]}
+        out = {"r": payload["r"], "c_calib": payload["c_calib"]}
+        if fixed_beta is None:
+            out["beta"] = payload["beta"]
         if fixed_tc is None:
             out["t_c"] = payload["t_c"]
         return out
@@ -316,6 +375,8 @@ def bootstrap_case_calib(meta, fit_payload, nboot, n_jobs, fixed_tc=None):
             "p50": float(np.percentile(vals, 50)),
             "p84": float(np.percentile(vals, 84)),
         }
+    if fixed_beta is not None:
+        out["beta_fixed"] = float(fixed_beta)
     return out
 
 
@@ -346,7 +407,7 @@ def plot_overlay(df, meta, fit_payload, outpath: Path, title: str, dpi: int):
         ax.plot(x_grid, plateau + transient, color="black", lw=2.0)
         ax.set_xscale("log")
         ax.set_title(rf"$\theta={theta:.3f}$")
-        ax.set_xlabel(r"$x=t_p H^\beta$")
+        ax.set_xlabel(r"$t_p$" if np.isclose(beta, 0.0, atol=1.0e-12) else r"$x=t_p H^\beta$")
         ax.set_ylabel(r"$\xi$")
         ax.grid(True, alpha=0.2)
     handles, labels = axes.ravel()[0].get_legend_handles_labels()
@@ -406,15 +467,16 @@ def main():
         theta_values = np.sort(df["theta"].unique())
         ode = load_ode_amplitudes(Path(args.ode_summary).resolve(), theta_values)
         meta = make_meta(df, theta_values, ode["F0"], ode["F_inf"], args.t_osc)
+        fixed_beta = None if args.fixed_beta is None else float(args.fixed_beta)
 
-        free_fit = fit_case(meta, fixed_tc=None)
-        fixed_fit = fit_case(meta, fixed_tc=1.5)
-        free_calib_fit = fit_case_calib(meta, fixed_tc=None)
-        fixed_calib_fit = fit_case_calib(meta, fixed_tc=1.5)
-        free_boot = bootstrap_case(meta, free_fit, args.bootstrap, args.n_jobs, fixed_tc=None)
-        fixed_boot = bootstrap_case(meta, fixed_fit, args.bootstrap, args.n_jobs, fixed_tc=1.5)
-        free_calib_boot = bootstrap_case_calib(meta, free_calib_fit, args.bootstrap, args.n_jobs, fixed_tc=None)
-        fixed_calib_boot = bootstrap_case_calib(meta, fixed_calib_fit, args.bootstrap, args.n_jobs, fixed_tc=1.5)
+        free_fit = fit_case(meta, fixed_tc=None, fixed_beta=fixed_beta)
+        fixed_fit = fit_case(meta, fixed_tc=1.5, fixed_beta=fixed_beta)
+        free_calib_fit = fit_case_calib(meta, fixed_tc=None, fixed_beta=fixed_beta)
+        fixed_calib_fit = fit_case_calib(meta, fixed_tc=1.5, fixed_beta=fixed_beta)
+        free_boot = bootstrap_case(meta, free_fit, args.bootstrap, args.n_jobs, fixed_tc=None, fixed_beta=fixed_beta)
+        fixed_boot = bootstrap_case(meta, fixed_fit, args.bootstrap, args.n_jobs, fixed_tc=1.5, fixed_beta=fixed_beta)
+        free_calib_boot = bootstrap_case_calib(meta, free_calib_fit, args.bootstrap, args.n_jobs, fixed_tc=None, fixed_beta=fixed_beta)
+        fixed_calib_boot = bootstrap_case_calib(meta, fixed_calib_fit, args.bootstrap, args.n_jobs, fixed_tc=1.5, fixed_beta=fixed_beta)
 
         reference = None
         ref_path = Path(args.reference_summary).resolve()
@@ -454,12 +516,13 @@ def main():
         fixed_calib_payload["F0_ode"] = free_payload["F0_ode"]
         fixed_calib_payload["F_inf_ode"] = free_payload["F_inf_ode"]
 
+        title_beta_note = "" if fixed_beta is None else rf", $\beta={fixed_beta:.1f}$ fixed"
         plot_overlay(
             df,
             meta,
             free_fit,
             outdir / "collapse_overlay_free_tc.png",
-            rf"Lattice v_w={args.fixed_vw:.1f} with ODE-fixed $F_0,F_\infty$ (free $t_c$)",
+            rf"Lattice v_w={args.fixed_vw:.1f} with ODE-fixed $F_0,F_\infty$ (free $t_c$){title_beta_note}",
             args.dpi,
         )
         plot_overlay(
@@ -467,7 +530,7 @@ def main():
             meta,
             fixed_fit,
             outdir / "collapse_overlay_fixed_tc1p5.png",
-            rf"Lattice v_w={args.fixed_vw:.1f} with ODE-fixed $F_0,F_\infty$ ($t_c=1.5$ fixed)",
+            rf"Lattice v_w={args.fixed_vw:.1f} with ODE-fixed $F_0,F_\infty$ ($t_c=1.5$ fixed){title_beta_note}",
             args.dpi,
         )
         plot_overlay(
@@ -475,7 +538,7 @@ def main():
             meta,
             free_calib_fit,
             outdir / "collapse_overlay_free_tc_calib.png",
-            rf"Lattice v_w={args.fixed_vw:.1f} with ODE-fixed $F_0,F_\infty$ and $c_{{calib}}$ (free $t_c$)",
+            rf"Lattice v_w={args.fixed_vw:.1f} with ODE-fixed $F_0,F_\infty$ and $c_{{calib}}$ (free $t_c$){title_beta_note}",
             args.dpi,
         )
         plot_overlay(
@@ -483,7 +546,7 @@ def main():
             meta,
             fixed_calib_fit,
             outdir / "collapse_overlay_fixed_tc1p5_calib.png",
-            rf"Lattice v_w={args.fixed_vw:.1f} with ODE-fixed $F_0,F_\infty$ and $c_{{calib}}$ ($t_c=1.5$ fixed)",
+            rf"Lattice v_w={args.fixed_vw:.1f} with ODE-fixed $F_0,F_\infty$ and $c_{{calib}}$ ($t_c=1.5$ fixed){title_beta_note}",
             args.dpi,
         )
         plot_raw_betaH(df, meta, free_fit, outdir, "xi_vs_betaH_odefixed_free_tc", args.dpi)
@@ -545,6 +608,7 @@ def main():
         final_summary = {
             "status": "ok",
             "fixed_vw": float(args.fixed_vw),
+            "fixed_beta": fixed_beta,
             "H_values": [float(v) for v in sorted(df["H"].unique())],
             "theta_values": [float(v) for v in theta_values],
             "n_points": int(len(df)),
