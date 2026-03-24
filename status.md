@@ -612,6 +612,41 @@ Old model-attempt outputs now live in:
 - `ode/analysis/results/old_attempts/compare_y2_matched_limit_slices_dm_tp_fitready_H1p000.png`
 - `ode/analysis/results/old_attempts/compare_y2_matched_limit_global_dm_tp_fitready_H1p000.png`
 
+---
+
+### 14. Pointwise shift pipeline: all-vw universality via s(tₚ, vw)
+
+**What was done** (4-script pipeline):
+
+1. **`infer_pointwise_shift_from_vw0p9_baseline.py`** — For each data point at any vw, inverts the frozen vw=0.9 FANH baseline curve ξ(x) to find `x_eff` such that `ξ_baseline(x_eff) = ξ_obs`. Defines `s = x_eff / x_base` as the pointwise multiplicative time shift needed. Inversion fraction: 100% (792/792 points). Interpolation accuracy: median |frac| residual ≈ 6×10⁻⁷ (essentially exact).
+
+2. **`fit_pointwise_shift_powerlaw.py`** — Fits 3 compact formulas to s(tₚ, vw):
+   - Best: `s = 1 + A[(0.9/vw)^m − 1]·tₚ^p`  with **A = 0.606, m = 0.281, p = −1.325** (rel_rmse = 3.3%)
+   - Runner-up: anchored log-power (rel_rmse = 3.4%)
+   - Plain power law (rel_rmse = 5.2%)
+
+3. **`apply_pointwise_shift_powerlaw.py`** — Applies the fitted shift formula as `x_eff = s·tₚ·H*^β` and evaluates against all vw data:
+
+   | vw  | Baseline rel_rmse | Shift rel_rmse | Improvement |
+   |-----|-------------------|----------------|-------------|
+   | 0.3 | 12.1%             | 2.1%           | 5.8×        |
+   | 0.5 | 7.6%              | 1.9%           | 4.0×        |
+   | 0.7 | 1.9%              | 1.4%           | 1.3×        |
+   | 0.9 | 0.7%              | 0.7%           | 1.0× (ref)  |
+   | **global** | **7.2%**  | **1.6%**       | **4.5×**    |
+
+4. **`fit_shift_width_correction.py`** — Tests whether a second-order width correction `δξ ≈ ½σ²·d²ξ/dx²` with `σ²(tₚ,vw) = B[(0.9/vw)^m − 1]·tₚ^p` further improves residuals. Result: width correction provides essentially no improvement (global rel_rmse 1.61% → 1.61%). The fitted m≈0.0003 is essentially zero, meaning width is not vw-dependent at this level of precision. Curvature correlations with residuals are weak (0.11–0.19).
+
+**Interpretation**: The single compact formula `s = 1 + 0.606·[(0.9/vw)^m − 1]·tₚ^p` with m=0.281, p=−1.325 effectively unifies all four wall velocities. The shift is largest at low vw (median s≈1.24 for vw=0.3) and decays with tₚ (negative p), consistent with slower walls needing a larger effective time stretch at early times. The width correction is negligible — the residual after shift is already ≲2% for all vw.
+
+**Key outputs**:
+- `results_pointwise_shift_from_vw0p9_baseline/pointwise_shift_table.csv`
+- `results_pointwise_shift_powerlaw/final_summary.json`
+- `results_pointwise_shift_powerlaw_applied/final_summary.json`
+- `results_shift_width_correction/final_summary.json`
+
+---
+
 ## Next Reasonable Step
 
 If we want a better semi-analytic closure, the next target is now split by use case:
@@ -620,4 +655,5 @@ If we want a better semi-analytic closure, the next target is now split by use c
 2. for the lattice comparison, keep `v_w = 0.9`, the fixed no-PT hilltop-log law, and treat the scalar negative amplitude exponent `\gamma \simeq -0.12` as the current best empirical `H_*` correction
 3. test whether that scalar `\gamma` is a real physical `H_*` amplitude dependence or is instead absorbing a remaining transition-shape mismatch in the PT sector
 4. keep the lower-`v_w` scalar-`\gamma` results as provisional only, because those fits still run to extreme `t_c`/`r` values and are not yet stable
-5. for multi-`v_w` universality: fit a single global formula `delta(v_w) = A*(1/v_w - 1/0.9)` and test whether folding this additive shift into the FANH model unifies all four wall velocities; also check whether a `v_w`-dependent `r` is needed as a secondary correction
+5. ~~for multi-`v_w` universality: fit additive shift~~ → **DONE via multiplicative pointwise shift pipeline** (section 14). Global rel_rmse reduced from 7.2% → 1.6% with formula `s = 1 + 0.606·[(0.9/vw)^0.281 − 1]·tₚ^{−1.325}`
+6. Consider physical interpretation of the shift: the `tₚ^{−1.325}` decay means early-time (small tₚ) points are shifted most — consistent with slow walls (small vw) having larger fractional delay at the start of percolation. Could be tested against ODE-computed tₚ distributions.
