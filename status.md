@@ -1227,6 +1227,534 @@ Conclusion:
 
 ---
 
+### 16. H* stability and extrapolation of the ODE-anchored model (March 24, 2026)
+
+**Model evaluated**: free lattice `f_\infty(\theta_0)`, free `t_c(\theta_0; v_w)`, shared `r`, fixed `\beta=0`.
+Source: `results_lattice_theta_tc_sharedr_free_finf_by_vw_beta0_tcmax300/final_summary.json` (section 15d).
+Fitted parameters: `r = 2.7787`, in-sample global rel_rmse `2.9%`.
+
+**Formula applied** for cross-H* evaluation:
+\[
+\xi = \left(\frac{2 t_p}{3 t_{\rm osc}}\right)^{3/2} \frac{f_\infty^{\rm lat}(\theta_0)}{F_0^{\rm ODE}(\theta_0)} + \frac{1}{1 + (t_p/t_c(\theta_0;v_w))^r}
+\]
+with `t_{osc} = 1.5`, `\beta = 0` (so `x = t_p`).
+
+**In-sample H* stability** (training set H* = 1.0, 1.5, 2.0):
+
+| H* | rel_rmse | bias |
+|----|----------|------|
+| 1.0 | 2.79% | −1.27% |
+| 1.5 | 2.23% | +1.01% |
+| 2.0 | 3.47% | +0.42% |
+
+Behavior is essentially flat across the training range with no systematic H* trend — the model is H*-stable within its training domain.
+
+**H*×vw breakdown** (in-sample):
+- `H*=1.0`: vw=0.3: 3.4%(+0.3%), vw=0.5: 2.6%(−0.8%), vw=0.7: 2.4%(−2.1%), vw=0.9: 2.7%(−2.5%)
+- `H*=1.5`: vw=0.3: 3.0%(−0.9%), vw=0.5: 2.3%(+0.6%), vw=0.7: 1.5%(+1.3%), vw=0.9: 1.7%(+1.5%)
+- `H*=2.0`: vw=0.3: 5.3%(−4.3%), vw=0.5: 3.2%(−2.2%), vw=0.7: 1.8%(+1.7%), vw=0.9: 2.5%(+2.2%)
+
+Worst in-sample cell: `H*=2.0, v_w=0.3` at 5.3% (bias −4.3%). Otherwise well-behaved.
+
+**Out-of-sample extrapolation to H* = 0.5**:
+
+| H* | rel_rmse | bias |
+|----|----------|------|
+| **0.5 (EXTRAP)** | **14.0%** | **+5.65%** |
+
+Per vw at H*=0.5: vw=0.3: 16.6%(+7.9%), vw=0.5: 14.6%(+6.0%), vw=0.7: 12.8%(+3.9%), vw=0.9: 11.4%(+3.2%).
+
+The model systematically **over-predicts** xi at small H* — positive bias across all vw, largest at slow walls. The degradation is severe (14% vs ~2.8% in-sample).
+
+**Interpretation**:
+- In-sample stability is excellent: the model is essentially H*-agnostic within H* = 1–2 (flat ~2.8% with no trend).
+- Extrapolation to H*=0.5 fails significantly — the systematic positive bias means the model predicts too-large xi when H* is small. This is consistent with a missing H*-dependent correction to either `f_\infty` or `t_c` that becomes important outside the training range.
+- The worst extrapolation cell is slow walls (vw=0.3) where the vw correction is most uncertain.
+- To improve H*=0.5 performance, options are: (a) retrain including H*=0.5 data, or (b) add an explicit H*-dependent tc or amplitude correction beyond those tested in section 15f.
+
+**Conclusion**:
+- The ODE-anchored model (section 15d) is a reliable predictor for H* ∈ {1.0, 1.5, 2.0} at ~2.8% global RMSE.
+- Do not use this model for H* < 0.5 without retraining or an explicit H*-correction.
+- The H*-independent `\beta=0` assumption is adequate within the training range but breaks down for extrapolation.
+
+---
+
+### 17. Testing `r(v_w)` with simpler timing structure (March 24, 2026)
+
+Using the canonical form
+\[
+\xi = \left(\frac{2t_p}{3t_{\rm osc}}\right)^{3/2}\frac{\tilde f}{F_0},\qquad
+\tilde f = f_\infty(\theta_0) + \frac{F_0(\theta_0)}{\left(\frac{2t_p}{3t_{\rm osc}}\right)^{3/2}\left[1+\left(\frac{t_p}{t_c}\right)^r\right]},
+\]
+with fixed `t_{osc}=1.5`, fixed `\beta=0`, and free lattice `f_\infty(\theta_0)`, we tested whether varying only the decay-shape parameter `r(v_w)` could replace most of the timing freedom.
+
+Source:
+- `results_lattice_theta_tc_rvw_tests_beta0_tcmax300/final_summary.json`
+
+Models compared:
+- baseline: shared `r`, `t_c = t_c(\theta_0,v_w)`
+- `rvw_globaltc`: `r = r(v_w)`, but a single shared global `t_c`
+- `rvw_theta`: `r = r(v_w)`, `t_c = t_c(\theta_0,v_w)`
+- `rvw_hgrid`: `r = r(v_w)`, `t_c = t_c(\theta_0,v_w,H_*)`
+
+Key results:
+- baseline: `rel_rmse = 2.876e-02`, `n_params = 31`
+- `rvw_globaltc`: `rel_rmse = 2.981e-02`, `n_params = 11`
+- `rvw_theta`: `rel_rmse = 2.129e-02`, `n_params = 34`
+- `rvw_hgrid`: `rel_rmse = 1.678e-02`, `n_params = 82`
+
+Fitted `r(v_w)` values:
+- `rvw_globaltc`: `{0.3: 4.506, 0.5: 2.975, 0.7: 1.941, 0.9: 1.759}`, with shared `t_c = 1.589`
+- `rvw_theta`: `{0.3: 4.714, 0.5: 3.605, 0.7: 2.351, 0.9: 2.158}`
+- `rvw_hgrid`: `{0.3: 4.613, 0.5: 4.013, 0.7: 2.594, 0.9: 2.465}`
+
+Interpretation:
+- allowing `r` to depend on `v_w` is important and restores the old good `v_w=0.9` behavior much better than the shared-`r` fit
+- however, forcing a single global `t_c` is too restrictive: it is actually slightly worse than the old shared-`r` baseline despite using `r(v_w)`
+- the useful minimal improvement is therefore `r(v_w)` together with `t_c(\theta_0,v_w)`
+- further improvement is possible with `t_c(\theta_0,v_w,H_*)`, but that is a high-parameter descriptive model rather than a compact closure
+
+Visual outputs:
+- `results_lattice_theta_tc_rvw_tests_beta0_tcmax300/comparison_sheet.png`
+- `results_lattice_theta_tc_rvw_tests_beta0_tcmax300/r_by_vw.png`
+- `results_lattice_theta_tc_rvw_tests_beta0_tcmax300/rmse_by_h.png`
+- `results_lattice_theta_tc_rvw_tests_beta0_tcmax300/rmse_by_h_vw.png`
+
+Conclusion:
+- **No**: fixing `t_c` to a single shared value and fitting only `r(v_w)` does not work well enough.
+- **Yes**: `r(v_w)` is still the right extra freedom, but it needs at least `t_c(\theta_0,v_w)` alongside it.
+
+---
+
+### 18. Compact `t_c` knob model: `t_c(\theta_0,v_w)=t_c^{(0)}(v_w)\,h(\theta_0)^\gamma` (March 24, 2026)
+
+We then tested a lower-parameter timing ansatz
+\[
+t_c(\theta_0,v_w)=t_c^{(0)}(v_w)\,h(\theta_0)^\gamma,
+\qquad
+h(\theta_0)=\log\!\left(\frac{e}{\cos^2(\theta_0/2)}\right),
+\]
+while keeping the canonical lattice form
+\[
+\xi = \left(\frac{2t_p}{3t_{\rm osc}}\right)^{3/2}\frac{\tilde f}{F_0},
+\qquad
+\tilde f=f_\infty(\theta_0)+\frac{F_0(\theta_0)}{\left(\frac{2t_p}{3t_{\rm osc}}\right)^{3/2}\left[1+\left(\frac{t_p}{t_c}\right)^{r(v_w)}\right]},
+\]
+with fixed `t_{osc}=1.5`, fixed `\beta=0`, free lattice `f_\infty(\theta_0)`, one shared `\gamma`, and one pair `{t_c^{(0)}(v_w), r(v_w)}` per wall velocity.
+
+Outputs were collected in:
+- `knob_tc/`
+
+Comparison against the earlier reference cases:
+- shared `t_c` + `r(v_w)`: `rel_rmse = 2.981e-02`
+- new factorized knob: `rel_rmse = 2.426e-02`
+- full `t_c(\theta_0,v_w)` + `r(v_w)`: `rel_rmse = 2.129e-02`
+
+So the factorized knob is a real improvement over a single shared `t_c`, but it does **not** fully recover the quality of the free `t_c(\theta_0,v_w)` fit.
+
+Best-fit compact-knob parameters:
+- `\gamma = 0.6341`
+- `t_c^{(0)}(0.3)=1.2963`
+- `t_c^{(0)}(0.5)=1.1149`
+- `t_c^{(0)}(0.7)=0.9985`
+- `t_c^{(0)}(0.9)=0.9574`
+- `r(0.3)=4.6815`
+- `r(0.5)=3.5096`
+- `r(0.7)=2.4532`
+- `r(0.9)=2.3049`
+
+Per-`v_w` rel_rmse for the factorized knob:
+- `v_w=0.3`: `3.41%`
+- `v_w=0.5`: `2.51%`
+- `v_w=0.7`: `1.64%`
+- `v_w=0.9`: `1.71%`
+
+Mean raw rel_rmse by H*:
+- `H*=1.0`: `2.37%`
+- `H*=1.5`: `1.74%`
+- `H*=2.0`: `2.23%`
+
+Interpretation:
+- the single global `\gamma` does capture a meaningful part of the `\theta_0` dependence in `t_c`
+- the ansatz is compact and much better constrained than a free `t_c(\theta_0,v_w)` table
+- but the data still wants more structure than one separable `h(\theta_0)^\gamma` factor can provide
+- in practice it is a useful middle ground: much better than shared `t_c`, but still visibly worse than the full `t_c(\theta_0,v_w)` model
+
+Main visual outputs:
+- `knob_tc/comparison_sheet.png`
+- `knob_tc/rmse_by_h.png`
+- `knob_tc/rmse_by_h_vw.png`
+- `knob_tc/r_by_vw.png`
+- `knob_tc/tc0_by_vw.png`
+
+Conclusion:
+- the proposed `t_c^{(0)}(v_w) h(\theta_0)^\gamma` knob works moderately well and is likely the best compact timing ansatz tested so far
+- but it is still not the final closure if the goal is to match the full `t_c(\theta_0,v_w)` accuracy
+
+---
+
+### 19. Replacing the transient with a stretched-exponential / Weibull kernel (March 24, 2026)
+
+We replaced the rational transient
+\[
+K(t_p)=\frac{1}{1+(t_p/t_c)^r}
+\]
+by the stretched-exponential kernel
+\[
+K(t_p)=\exp\!\left[-\left(\frac{t_p}{t_c}\right)^r\right].
+\]
+
+Implementation detail in the canonical code path:
+- `D = exp((x/t_c)^r)` so that `K = 1/D = exp(-(x/t_c)^r)`
+
+This was added to the shared helper in
+- `fit_lattice_fixed_ode_amplitudes_theta_tc_shared_r_by_vw.py`
+
+and then rerun in:
+- `results_lattice_theta_tc_rvw_tests_beta0_tcmax300_weibull/`
+- `knob_tc_weibull/`
+
+Matched comparison against the old kernel:
+
+| model | old `1/(1+(t_p/t_c)^r)` | Weibull `exp(-(t_p/t_c)^r)` |
+|------|------:|------:|
+| shared `t_c` + `r(v_w)` | 0.02981 | 0.02904 |
+| compact knob `t_c^{(0)}(v_w) h(\theta_0)^\gamma` + `r(v_w)` | 0.02426 | 0.02359 |
+| full `t_c(\theta_0,v_w)` + `r(v_w)` | 0.02129 | 0.02041 |
+
+So the Weibull kernel is consistently better in this family, but only modestly so.
+
+Best-fit compact-knob Weibull parameters:
+- `\gamma = 0.6522`
+- `t_c^{(0)}(0.3)=1.3568`
+- `t_c^{(0)}(0.5)=1.1953`
+- `t_c^{(0)}(0.7)=1.1033`
+- `t_c^{(0)}(0.9)=1.0671`
+- `r(0.3)=3.7690`
+- `r(0.5)=2.9142`
+- `r(0.7)=2.1056`
+- `r(0.9)=1.9864`
+
+Best full-table Weibull fit:
+- global `rel_rmse = 2.041e-02`
+- `r(v_w) = {0.3: 3.781, 0.5: 2.970, 0.7: 2.015, 0.9: 1.861}`
+
+Interpretation:
+- the stretched-exponential decay helps the multi-`v_w` fits slightly across the board
+- it lowers the fitted `r(v_w)` values relative to the rational kernel, which is consistent with avoiding an overly sharp effective decay
+- however, it does **not** fundamentally change the model ranking: the fully free `t_c(\theta_0,v_w)` table still outperforms the compact factorized knob, which still outperforms a single shared `t_c`
+
+Main outputs:
+- `results_lattice_theta_tc_rvw_tests_beta0_tcmax300_weibull/comparison_sheet.png`
+- `knob_tc_weibull/comparison_sheet.png`
+- `knob_tc_weibull/tc0_by_vw.png`
+
+Conclusion:
+- the Weibull kernel is a real but incremental improvement
+- if we keep this model family, the best compact version so far is now the Weibull `t_c^{(0)}(v_w) h(\theta_0)^\gamma` ansatz
+- the best overall version in this family remains the Weibull `r(v_w)` + free `t_c(\theta_0,v_w)` fit
+
+---
+
+### 20. Direct observed-kernel diagnostic from `\xi` (March 24, 2026)
+
+To inspect the transition shape without re-imposing a kernel ansatz, we defined
+\[
+K_{\rm obs}(t_p,\theta_0,v_w)=\xi(t_p,\theta_0,v_w)-\frac{f_\infty^{\rm ODE}(\theta_0)}{F_0^{\rm ODE}(\theta_0)}\,R^3
+\]
+and, for this first diagnostic pass, used exactly the user-requested choice
+\[
+R^3=\left(\frac{t_p}{t_{\rm osc}}\right)^{3/2},\qquad t_{\rm osc}=1.5.
+\]
+
+This was plotted against:
+- `t_p` at fixed `v_w`, with all `\theta_0` overlaid
+- `t_p` at fixed `\theta_0`, with all `v_w` overlaid
+- `t_p / t_c^{\rm fit}` using the current best Weibull `rvw_hgrid` fitted `t_c(\theta_0,v_w,H_*)` table
+
+Outputs:
+- `results_kobs_observed_plainR3_weibull_rvw_hgrid/kobs_vs_tp_by_vw.png`
+- `results_kobs_observed_plainR3_weibull_rvw_hgrid/kobs_vs_tp_by_theta.png`
+- `results_kobs_observed_plainR3_weibull_rvw_hgrid/kobs_vs_tp_over_tc_by_vw.png`
+- `results_kobs_observed_plainR3_weibull_rvw_hgrid/kobs_table.csv`
+
+Notes:
+- the diagnostic used the best current fit summary only for the `t_p/t_c^{\rm fit}` rescaling, not for defining `K_{\rm obs}` itself
+- because the subtraction uses the raw ODE asymptotic piece directly, the observed `K_{\rm obs}` range is broad (`min ≈ -2.21`, `max ≈ 1.75`), which already indicates substantial non-universality / mismatch beyond a simple universal kernel picture
+- if needed, the same plots can be regenerated with the current repo convention `R^3=(2t_p/3t_{\rm osc})^{3/2}` for a direct apples-to-apples comparison to the fitted model family
+
+---
+
+### 21. Broken-power interpolation ansatz (March 25, 2026)
+
+Tested the clean non-additive interpolation
+\[
+\xi = \left(1 + u^r\right)^{1/r},
+\qquad
+u = \frac{C(v_w)\,F_\infty(\theta_0)}{F_0(\theta_0)^2}\left(\frac{2x}{3t_{\rm osc}}\right)^{3/2},
+\qquad
+x=t_p H_*^\beta,
+\]
+equivalently
+\[
+\tilde f =
+\left[
+\big(C(v_w)\,f_\infty(\theta_0)\big)^r
++
+\left(\frac{F_0(\theta_0)}{(2x/3t_{\rm osc})^{3/2}}\right)^r
+\right]^{1/r},
+\qquad
+f_\infty(\theta_0)=\frac{F_\infty(\theta_0)}{F_0(\theta_0)}.
+\]
+
+For these tests we fixed:
+- `beta = 0`
+- `t_osc = 1.5`
+- ODE amplitudes `F_0(\theta_0), F_\infty(\theta_0)`
+
+Three staged fits were run in `results_lattice_broken_powerlaw_beta0`:
+
+1. `vw0p9_c1_sharedr`
+   - fit only `r` on the `v_w = 0.9` slice with `C=1`
+   - result: `r = 1.11994`, `rel_rmse = 0.02687`
+   - this is substantially worse than the older dedicated `v_w=0.9` timing-kernel fits, so the automatic crossover from `F_0/F_\infty` alone is not enough
+
+2. `allvw_cvw_sharedr`
+   - fit `C(v_w)` with one shared `r`
+   - result: `r = 1.05044`, `C(0.3,0.5,0.7,0.9) = (1.1225, 1.0376, 0.9315, 1.0)`, `rel_rmse = 0.04832`
+   - this performs poorly; a single shared shape parameter is too restrictive
+
+3. `allvw_cvw_rvw`
+   - fit both `C(v_w)` and `r(v_w)`
+   - result:
+     - `C(0.3,0.5,0.7,0.9) = (0.7428, 0.7138, 0.8040, 1.0)`
+     - `r(0.3,0.5,0.7,0.9) = (0.7905, 0.8272, 0.9549, 1.1199)`
+     - global `rel_rmse = 0.02659`
+   - this is the best version of the broken-power ansatz tested so far, but it is still worse than the better kernel-based models
+
+Comparison against previous bests:
+- broken-power best: `0.02659`
+- compact Weibull knob model: `0.02359`
+- full Weibull `r(v_w)` + free `t_c(\theta_0,v_w)` model: `0.02041`
+- full Weibull `r(v_w)` + free `t_c(\theta_0,v_w,H_*)` model: `0.01527`
+
+Interpretation:
+- the broken-power ansatz is clean and automatically enforces `\xi \to 1` as `t_p \to 0`
+- however, with ODE-fixed amplitudes it is too rigid: it predicts the crossover location entirely from `F_0/F_\infty`
+- the data still wants additional timing freedom beyond what this amplitude ratio can supply
+- allowing `r(v_w)` helps, but not enough to beat the explicit timing-kernel models
+
+Main outputs:
+- `results_lattice_broken_powerlaw_beta0/comparison_sheet.png`
+- `results_lattice_broken_powerlaw_beta0/vw0p9_c1_sharedr/collapse_overlay.png`
+- `results_lattice_broken_powerlaw_beta0/allvw_cvw_sharedr/collapse_overlay.png`
+- `results_lattice_broken_powerlaw_beta0/allvw_cvw_rvw/collapse_overlay.png`
+- `results_lattice_broken_powerlaw_beta0/r_by_vw.png`
+- `results_lattice_broken_powerlaw_beta0/c_by_vw.png`
+
+Conclusion:
+- keep the broken-power ansatz as a useful boundary-consistent diagnostic model
+- do not promote it to the main lattice fit ansatz in its current ODE-anchored form
+- if revisited, the next logical extension would be to let the effective time variable itself be warped, rather than trying to absorb everything into `C(v_w)` and `r(v_w)`
+
+---
+
+### 22. Log-log check of `t_c^{fit}(theta0,v_w)` vs `h(theta0)` (March 25, 2026)
+
+To test how close the free `t_c(theta0,v_w)` table is to the compact factorized knob
+\[
+t_c(\theta_0,v_w)=t_c^{(0)}(v_w)\,h(\theta_0)^\gamma,
+\qquad
+h(\theta_0)=\log\!\left(\frac{e}{\cos^2(\theta_0/2)}\right),
+\]
+we plotted
+\[
+\log t_c^{fit}(\theta_0,v_w)\ \text{vs}\ \log h(\theta_0)
+\]
+for each `v_w`, using the best non-`H_*` Weibull timing-table fit:
+- source: `knob_tc_weibull/rvw_theta/final_summary.json`
+
+Outputs:
+- `results_log_tcfit_vs_log_htheta_weibull_rvw_theta/log_tcfit_vs_log_htheta.png`
+- `results_log_tcfit_vs_log_htheta_weibull_rvw_theta/log_tcfit_vs_log_htheta.csv`
+- `results_log_tcfit_vs_log_htheta_weibull_rvw_theta/fit_summary.json`
+
+Straight-line slopes from separate log-log fits:
+- `gamma_fit(0.3) = 0.3819`
+- `gamma_fit(0.5) = 0.4579`
+- `gamma_fit(0.7) = 0.6243`
+- `gamma_fit(0.9) = 0.6642`
+
+Interpretation:
+- the relation is roughly power-law-like, but the effective slope is not universal across `v_w`
+- slow walls (`v_w=0.3,0.5`) want a noticeably shallower `theta_0` dependence than fast walls (`v_w=0.7,0.9`)
+- this explains why the single shared-`\gamma` compact knob worked reasonably well but could not fully match the free `t_c(\theta_0,v_w)` table
+
+---
+
+### 23. Shifted-`h` compact timing knob: `t_c = t_c^{(0)}(v_w)\,(h+h_0)^{\gamma(v_w)}` (March 25, 2026)
+
+Tested the minimal extension
+\[
+t_c(\theta_0,v_w)=t_c^{(0)}(v_w)\,\big(h(\theta_0)+h_0\big)^{\gamma(v_w)},
+\qquad
+h(\theta_0)=\log\!\left(\frac{e}{\cos^2(\theta_0/2)}\right),
+\qquad
+h_0\ge 0,
+\]
+with:
+- shared `h_0`
+- free `t_c^{(0)}(v_w)`
+- free `\gamma(v_w)`
+- free `r(v_w)`
+- same Weibull kernel as the current best compact/reference family
+
+Implemented in:
+- `fit_lattice_theta_tc_knob_h0_tests.py`
+
+Outputs:
+- `knob_tc_h0_weibull/comparison_sheet.png`
+- `knob_tc_h0_weibull/rmse_by_h.png`
+- `knob_tc_h0_weibull/rmse_by_h_vw.png`
+- `knob_tc_h0_weibull/gamma_by_vw.png`
+- `knob_tc_h0_weibull/tc0_by_vw.png`
+- `knob_tc_h0_weibull/final_summary.json`
+
+Best-fit parameters:
+- `h_0 = 3.4457`
+- `t_c^{(0)}(0.3,0.5,0.7,0.9) = (0.3838, 0.2527, 0.1210, 0.1000)`
+- `\gamma(0.3,0.5,0.7,0.9) = (0.9034, 1.0870, 1.5130, 1.6193)`
+- `r(0.3,0.5,0.7,0.9) = (3.7293, 2.9469, 1.9949, 1.8438)`
+
+Fit quality comparison in the Weibull family:
+- old compact knob `t_c^{(0)}(v_w)\,h(\theta_0)^\gamma`: `rel_rmse = 0.02359`
+- new shifted-`h` knob `(h+h_0)^{\gamma(v_w)}`: `rel_rmse = 0.02076`
+- full free `t_c(\theta_0,v_w)` table: `rel_rmse = 0.02041`
+
+Interpretation:
+- this extension works well
+- introducing a shared offset `h_0` plus `\gamma(v_w)` captures most of the remaining curvature and wall-speed dependence
+- the new compact knob nearly saturates the performance of the full free timing table, while using far fewer timing parameters
+- the remaining gap to the fully free `t_c(\theta_0,v_w)` model is now small (`0.02076` vs `0.02041`)
+
+This is the best compact timing ansatz tested so far in the current Weibull family.
+
+---
+
+### 24. Same shifted-`h` timing knob inside the broken-power ansatz (March 25, 2026)
+
+We tested the broken-power-law analog with an explicit timing remap inside the crossover variable:
+\[
+\xi=\left(1+u^{r(v_w)}\right)^{1/r(v_w)},
+\qquad
+u=\frac{F_\infty(\theta_0)}{F_0(\theta_0)^2}\left(\frac{2x}{3t_{\rm osc}\,t_c(\theta_0,v_w)}\right)^{3/2},
+\]
+with
+\[
+t_c(\theta_0,v_w)=t_c^{(0)}(v_w)\,\big(h(\theta_0)+h_0\big)^{\gamma(v_w)},
+\qquad
+h(\theta_0)=\log\!\left(\frac{e}{\cos^2(\theta_0/2)}\right).
+\]
+
+Important identifiability point:
+- in this timed broken-power model, `C(v_w)` and `t_c^{(0)}(v_w)` are exactly degenerate through the combination `C / (t_c^{(0)})^{3/2}`
+- therefore `C(v_w)` was fixed to `1` for the timed fit
+
+Implemented in:
+- `fit_lattice_broken_powerlaw_knob_h0.py`
+
+Outputs:
+- `results_lattice_broken_powerlaw_knob_h0_beta0/comparison_sheet.png`
+- `results_lattice_broken_powerlaw_knob_h0_beta0/rmse_by_h.png`
+- `results_lattice_broken_powerlaw_knob_h0_beta0/r_by_vw.png`
+- `results_lattice_broken_powerlaw_knob_h0_beta0/gamma_by_vw.png`
+- `results_lattice_broken_powerlaw_knob_h0_beta0/tc0_by_vw.png`
+- `results_lattice_broken_powerlaw_knob_h0_beta0/final_summary.json`
+
+Three relevant broken-power cases:
+
+1. `C=1`, `r(v_w)`, no timing knob:
+- `rel_rmse = 0.03827`
+
+2. `C=1`, `r(v_w)`, shifted-`h` timing knob:
+- `rel_rmse = 0.01968`
+- `t_c^{(0)}(0.3,0.5,0.7,0.9) = (1.2909, 1.3121, 1.1484, 1.1347)`
+- `\gamma(0.3,0.5,0.7,0.9) = (0.1145, 0.0843, -0.0171, -0.0371)`
+- `h_0 \approx 0`
+- `r(0.3,0.5,0.7,0.9) = (0.7293, 0.7784, 0.9669, 1.0093)`
+
+3. previous descriptive broken-power reference with free `C(v_w)` and `r(v_w)`:
+- `rel_rmse = 0.02659`
+
+Interpretation:
+- the timing knob helps the broken-power ansatz dramatically once `C` is fixed
+- the improvement is large: `0.03827 -> 0.01968`
+- it also beats the previous free-`C(v_w)` broken-power reference (`0.02659`)
+- the fitted optimum wants `h_0 \to 0`, so for this broken-power family the extra shared offset is not actually needed
+- the fitted `\gamma(v_w)` values are small and even slightly negative at high `v_w`, meaning the broken-power model prefers only a weak angle-dependent timing correction
+
+Conclusion:
+- the “same” compact timing idea does work for the broken-power ansatz
+- but because of the exact `C`/`t_c^{(0)}` degeneracy, it only makes sense in a `C=1` gauge
+- in that gauge, it becomes the best broken-power variant tested so far
+
+---
+
+### 25. Minimal broken-power timing reductions (March 25, 2026)
+
+Following the shifted-`h` broken-power result, we tested two simpler reductions in:
+- `fit_lattice_broken_powerlaw_minimal_tests.py`
+
+Outputs:
+- `results_lattice_broken_powerlaw_minimal_beta0/comparison_sheet.png`
+- `results_lattice_broken_powerlaw_minimal_beta0/rmse_by_h.png`
+- `results_lattice_broken_powerlaw_minimal_beta0/r_by_vw.png`
+- `results_lattice_broken_powerlaw_minimal_beta0/tc_by_vw.png`
+- `results_lattice_broken_powerlaw_minimal_beta0/final_summary.json`
+
+Cases tested:
+
+1. Free `t_c(v_w)` and `r(v_w)`, with no `theta_0` dependence:
+\[
+\xi=\left(1+u^{r(v_w)}\right)^{1/r(v_w)},
+\qquad
+u=\frac{F_\infty(\theta_0)}{F_0(\theta_0)^2}\left(\frac{2x}{3t_{\rm osc}\,t_c(v_w)}\right)^{3/2}
+\]
+
+Result:
+- `rel_rmse = 0.02460`
+- `t_c(0.3,0.5,0.7,0.9) = (1.2192, 1.2521, 1.1565, 1.1534)`
+- `r(0.3,0.5,0.7,0.9) = (0.7905, 0.8272, 0.9549, 0.9819)`
+
+2. Three-parameter smooth reduction:
+\[
+t_c(v_w)=t_c^*,
+\qquad
+r(v_w)=r_0+r_1 v_w
+\]
+
+Result:
+- `rel_rmse = 0.02608`
+- `t_c^* = 1.1996`
+- `r_0 = 0.7208`
+- `r_1 = 0.2710`
+- hence `r(0.3,0.5,0.7,0.9) = (0.8021, 0.8563, 0.9105, 0.9647)`
+
+Reference for comparison:
+- shifted-`h` broken-power model: `rel_rmse = 0.01968`
+
+Interpretation:
+- dropping both `h_0` and `\gamma(v_w)` entirely is **not** good enough; the RMSE jumps from `0.01968` to `0.02460`
+- the 3-parameter smooth reduction is still acceptable as a compact summary, but it loses additional accuracy (`0.02608`)
+- `t_c(v_w)` does come out nearly flat (`~1.15–1.25`), so the constant-`t_c` hypothesis is not absurd
+- however, the residual loss shows that even the weak angle dependence encoded by the shifted-`h` timing knob matters
+
+Bottom line:
+- for the broken-power family, the best compact model remains the shifted-`h` timing version
+- the strictly minimal `t_c(v_w), r(v_w)` and the 3-parameter `t_c^*, r_0, r_1` reductions are useful summaries, but they do not preserve the full fit quality
+
+---
+
 ## Next Reasonable Step
 
 If we want a better semi-analytic closure, the next target is now split by use case:
@@ -1236,5 +1764,282 @@ If we want a better semi-analytic closure, the next target is now split by use c
 3. if an explicit `H_*` correction is still needed, it likely has to be more structured than either a single global `H_*^\gamma` factor or a single `t_c \propto H_*^{\alpha_{tc}}` power
 4. keep older lower-`v_w` scalar-`\gamma` results as provisional only, because they are not supported by the newer shared-`r`, free-`f_\infty`, canonical-`\tilde f` comparison
 5. ~~for multi-`v_w` universality: fit additive shift~~ → **DONE via multiplicative pointwise shift pipeline** (section 14). Global rel_rmse reduced from 7.2% → 1.6% with formula `s = 1 + 0.606·[(0.9/vw)^0.281 − 1]·tₚ^{−1.325}`
-6. **ODE-anchored approach** (section 15) reaches ~1.9% global RMSE with per-(θ₀,vw) tc and shared r; next question is whether a smooth parametric formula `tc(θ₀, vw)` can be found (e.g. `tc ∝ (1/vw)^α · g(θ₀)`), which would reduce the parameter count while maintaining accuracy.
+6. **ODE-anchored approach** (sections 15d, 16): reaches ~2.8% global RMSE for H*=1–2 (flat, stable). H*=0.5 extrapolation gives 14% RMSE with systematic +6% over-prediction. Options: (a) retrain including H*=0.5, or (b) add explicit H*-dependent tc or amplitude correction. The best calibrated benchmark (15g, section 15b) at 1.9% RMSE with per-vw `c(v_w)` is also H*-stable in-sample (1.78/1.83/1.68% by H*); its H*=0.5 performance not yet evaluated.
 7. The systematic ~20% discrepancy between lattice and ODE F_inf values needs investigation — could be a bubble nucleation geometry effect or a lattice-spacing artefact.
+8. A smooth parametric formula `tc(θ₀, vw)` (e.g. `tc ∝ (1/vw)^α · g(θ₀)`) could reduce the large parameter count of the per-(θ₀,vw) tc model while maintaining accuracy.
+
+---
+
+### 26. Broken-power fits including `H_* = 0.5` (March 25, 2026)
+
+We extended the broken-power-law fits from the `H_* = 1.0, 1.5, 2.0` set to the full
+`H_* = 0.5, 1.0, 1.5, 2.0` set.
+
+New outputs:
+- `results_lattice_broken_powerlaw_knob_h0_beta0_H0p5`
+- `results_lattice_broken_powerlaw_minimal_beta0_H0p5`
+
+#### 26a. Compact shifted-`h` broken-power fit
+
+Script:
+- `fit_lattice_broken_powerlaw_knob_h0.py --h-values 0.5 1.0 1.5 2.0`
+
+Best case:
+- `allvw_c1_rvw_h0gammavw`
+
+Fit quality:
+- `rel_rmse = 0.02662`
+- `n_points = 1056`
+
+Parameters:
+- `h_0 = 9.78e-12` (again effectively zero)
+- `t_c^{(0)}(0.3,0.5,0.7,0.9) = (1.2163, 1.1981, 1.1353, 1.1229)`
+- `\gamma(0.3,0.5,0.7,0.9) = (0.0611, 0.0318, -0.0165, -0.0325)`
+- `r(0.3,0.5,0.7,0.9) = (0.7688, 0.8382, 0.9701, 1.0110)`
+
+Mean raw RMSE by `H_*`:
+- `H_*=0.5 -> 0.0350`
+- `H_*=1.0 -> 0.0191`
+- `H_*=1.5 -> 0.0223`
+- `H_*=2.0 -> 0.0177`
+
+Interpretation:
+- adding `H_*=0.5` degrades the compact broken-power fit noticeably, from `0.01968` to `0.02662`
+- the new stress point is clearly the `H_*=0.5` slice itself
+- the fit still prefers `h_0 \to 0`, so the shared offset remains unnecessary even after including low `H_*`
+
+#### 26b. Minimal broken-power reductions with `H_* = 0.5`
+
+Script:
+- `fit_lattice_broken_powerlaw_minimal_tests.py --h-values 0.5 1.0 1.5 2.0`
+
+Cases:
+
+1. Free `t_c(v_w)` and `r(v_w)`:
+- `rel_rmse = 0.02902`
+- `t_c(0.3,0.5,0.7,0.9) = (1.2164, 1.1992, 1.1334, 1.1192)`
+- `r(0.3,0.5,0.7,0.9) = (0.7911, 0.8503, 0.9634, 0.9973)`
+
+2. Three-parameter smooth reduction:
+\[
+t_c(v_w)=t_c^*,
+\qquad
+r(v_w)=r_0+r_1 v_w
+\]
+
+Result:
+- `rel_rmse = 0.03127`
+- `t_c^* = 1.1683`
+- `r_0 = 0.7507`
+- `r_1 = 0.2411`
+
+Interpretation:
+- with `H_*=0.5` included, the compact shifted-`h` broken-power model remains the best broken-power variant
+- the minimal `t_c(v_w), r(v_w)` reduction worsens to `0.02902`
+- the 3-parameter smooth reduction worsens further to `0.03127`
+- the main new failure mode is the low-`H_*` band, not the previous `H_*=2` tension
+
+Bottom line:
+- the broken-power family is significantly less stable once `H_*=0.5` is included
+- even its best compact version now misses the low-`H_*` slice at the `~3.5%` mean-RMSE level
+
+---
+
+### 27. Broken-power follow-up: free `beta` and smooth `v_w` reduction (March 25, 2026)
+
+We followed up on the expanded broken-power `H_* = 0.5, 1.0, 1.5, 2.0` dataset with two tests:
+
+1. let `beta` float in the best compact broken-power timing model
+2. smooth the minimal `t_c(v_w), r(v_w)` reduction further using linear functions of `v_w`
+
+New outputs:
+- `results_lattice_broken_powerlaw_knob_h0_betafree_H0p5`
+- `results_lattice_broken_powerlaw_minimal_beta0_H0p5_smooth`
+
+#### 27a. Compact broken-power model with free `beta`
+
+Script:
+- `fit_lattice_broken_powerlaw_knob_h0.py --h-values 0.5 1.0 1.5 2.0 --free-beta`
+
+Model:
+\[
+\xi = \left(1 + u^{r(v_w)}\right)^{1/r(v_w)},
+\qquad
+u=\frac{F_\infty(\theta_0)}{F_0(\theta_0)^2}
+\left(\frac{2\,t_p\,H_*^\beta}{3\,t_{\rm osc}\,t_c(\theta_0,v_w)}\right)^{3/2},
+\]
+with
+\[
+t_c(\theta_0,v_w)=t_c^{(0)}(v_w)\,h(\theta_0)^{\gamma(v_w)},
+\qquad h_0 \to 0.
+\]
+
+Result:
+- `beta = -0.1141`
+- `rel_rmse = 0.02143`
+
+Compared to the previous `beta=0` compact fit:
+- `0.02662 -> 0.02143`
+
+This is a real improvement, not a tiny numerical shift. In particular:
+- mean raw RMSE at `H_*=0.5` improves from `0.0350` to `0.0256`
+- `H_*=1.5` improves from `0.0223` to `0.0152`
+- `H_*=2.0` improves from `0.0177` to `0.0158`
+
+Best-fit compact parameters:
+- `t_c^{(0)}(0.3,0.5,0.7,0.9) = (1.4136, 1.3902, 1.3020, 1.2888)`
+- `\gamma(0.3,0.5,0.7,0.9) = (0.1224, 0.0926, 0.0403, 0.0235)`
+- `r(0.3,0.5,0.7,0.9) = (0.6733, 0.7311, 0.8404, 0.8742)`
+- `h_0 = 7.4 \times 10^{-17}`
+
+Interpretation:
+- for the broken-power family, `beta=0` is **not** optimal once `H_*=0.5` is included
+- the fit clearly prefers a small negative `beta`, very close in size to the old `v_w=0.9` timing collapse result
+- the offset `h_0` is still unnecessary; it again runs to zero
+
+#### 27b. Smooth `t_c(v_w), r(v_w)` reduction
+
+Script:
+- `fit_lattice_broken_powerlaw_minimal_tests.py --h-values 0.5 1.0 1.5 2.0`
+
+New smooth case:
+\[
+t_c(v_w)=t_{c0}+t_{c1} v_w,
+\qquad
+r(v_w)=r_0+r_1 v_w
+\]
+
+Result:
+- `rel_rmse = 0.02958`
+- `t_{c0} = 1.2839`
+- `t_{c1} = -0.1951`
+- `r_0 = 0.6710`
+- `r_1 = 0.3836`
+
+Implied values:
+- `t_c(0.3,0.5,0.7,0.9) = (1.2253, 1.1863, 1.1473, 1.1083)`
+- `r(0.3,0.5,0.7,0.9) = (0.7861, 0.8628, 0.9395, 1.0163)`
+
+Comparison within the minimal family:
+- free `t_c(v_w), r(v_w)`: `0.02902`
+- linear `t_c(v_w), r(v_w)`: `0.02958`
+- constant `t_c`, linear `r(v_w)`: `0.03127`
+
+Interpretation:
+- smoothing both `t_c` and `r` helps relative to the constant-`t_c` 3-parameter model
+- but it is only a modest gain, and it still does **not** catch the compact broken-power model
+- the main missing ingredient was the free `beta`, not just a smoother `v_w` interpolation
+
+Bottom line:
+- in the broken-power family with `H_*=0.5` included, the most important remaining freedom is a nonzero `beta`
+- a smooth linear `t_c(v_w), r(v_w)` reduction is viable as a compact predictive summary, but it remains substantially worse than the compact timing-knob model with free `beta`
+
+---
+
+### 28. Broken-power compact fit with free `beta` on `H_* = 1.0, 1.5, 2.0` only (March 25, 2026)
+
+We reran the compact broken-power timing-knob model on the original
+`H_* = 1.0, 1.5, 2.0` set only, but this time allowing `beta` to float:
+
+Script:
+- `fit_lattice_broken_powerlaw_knob_h0.py --free-beta`
+
+Output:
+- `results_lattice_broken_powerlaw_knob_h0_betafree_H1p0H1p5H2p0`
+
+Best compact case:
+- `allvw_c1_rvw_h0gammavw`
+
+Result:
+- `beta = -0.0974`
+- `rel_rmse = 0.01753`
+
+Comparison to the previous `beta=0` compact fit on the same `H_* = 1,1.5,2` set:
+- old: `rel_rmse = 0.01968`
+- new: `rel_rmse = 0.01753`
+
+So even without `H_*=0.5`, the broken-power compact model still prefers a small negative `beta`.
+
+Best-fit compact parameters:
+- `t_c^{(0)}(0.3,0.5,0.7,0.9) = (1.3659, 1.3985, 1.2142, 1.2057)`
+- `\gamma(0.3,0.5,0.7,0.9) = (0.1503, 0.1222, 0.0186, -0.0003)`
+- `r(0.3,0.5,0.7,0.9) = (0.6837, 0.7261, 0.8934, 0.9284)`
+- `h_0 \to 0`
+
+Mean raw RMSE by `H_*`:
+- `H_*=1.0 -> 0.01759`
+- `H_*=1.5 -> 0.01440`
+- `H_*=2.0 -> 0.01459`
+
+Interpretation:
+- the improvement comes mainly from `H_*=1.0` and `1.5`
+- `H_*=2.0` stays essentially unchanged
+- the preferred `beta` is very close to the old standalone good `v_w=0.9` collapse value (`beta \simeq -0.095`)
+
+Bottom line:
+- for the broken-power compact family, `beta=0` is not optimal even on the original `H_*=1,1.5,2.0` domain
+- the data consistently prefers `beta \approx -0.10`
+
+---
+
+### 29. Broken-power with anchored pointwise time shift `s(t_p, v_w)` (March 25, 2026)
+
+We tested the broken-power ansatz with the old pointwise time-shift idea applied directly.
+
+Procedure:
+
+1. Fit a frozen `v_w = 0.9` broken-power baseline on `H_* = 1.0, 1.5, 2.0` only:
+   - output: `results_lattice_broken_powerlaw_knob_h0_betafree_H1p0H1p5H2p0_vw0p9`
+   - best compact baseline:
+     - `beta = -0.1118`
+     - `r = 0.9283`
+     - `t_c^{(0)}(0.9) = 3.8916`
+     - `\gamma(0.9) = -0.2979`
+     - `h_0 = 50` (railed)
+     - in-sample `v_w=0.9` rel-RMSE: `0.01270`
+
+2. Freeze that baseline and fit the anchored shift
+\[
+s(t_p, v_w)=1 + A\left[\left(\frac{0.9}{v_w}\right)^m - 1\right] t_p^p
+\]
+with
+\[
+x_{\rm eff}=s(t_p,v_w)\,t_p\,H_*^\beta
+\]
+inside the broken-power `u`.
+
+Script:
+- `fit_broken_power_shift_from_vw0p9.py`
+
+Output:
+- `results_broken_power_shift_from_vw0p9_H1p0H1p5H2p0`
+
+Best-fit shift parameters:
+- `A = 0.8408`
+- `m = 0.2224`
+- `p = -1.2303`
+
+Fit quality:
+- frozen `v_w=0.9` baseline applied to all `v_w`: `rel_rmse = 0.07460`
+- same baseline plus fitted shift: `rel_rmse = 0.02035`
+
+Per-`v_w` after shift:
+- `v_w=0.3 -> 0.02508`
+- `v_w=0.5 -> 0.02251`
+- `v_w=0.7 -> 0.01897`
+- `v_w=0.9 -> 0.01270`
+
+Mean raw RMSE by `H_*` after shift:
+- `H_*=1.0 -> 0.02186`
+- `H_*=1.5 -> 0.01684`
+- `H_*=2.0 -> 0.02193`
+
+Interpretation:
+- the anchored shift works for the broken-power family in the same qualitative way it worked for the FANH baseline
+- it dramatically improves a frozen `v_w=0.9` baseline (`7.46% -> 2.04%`)
+- however, it still does **not** beat the direct all-`v_w` broken-power compact fit with free `beta`, which reached `1.75%`
+- so for the broken-power family, the shift is useful, but it is not the best current parametrization
+
+Bottom line:
+- `s(t_p, v_w)` is a viable closure for transporting a single `v_w=0.9` broken-power baseline to other wall speeds
+- but the direct compact broken-power fit across all `v_w` remains better than the frozen-baseline-plus-shift construction

@@ -102,6 +102,8 @@ def kernel_label(kernel: str) -> str:
         return r"$1 + (t_p/t_c)^r$"
     if kernel == "shifted":
         return r"$(1 + t_p/t_c)^r$"
+    if kernel == "weibull":
+        return r"$e^{-(t_p/t_c)^r}$"
     raise ValueError(f"Unknown transient kernel: {kernel}")
 
 
@@ -110,6 +112,8 @@ def kernel_denom_text(kernel: str) -> str:
         return "D = 1 + (x/t_c)^r"
     if kernel == "shifted":
         return "D = (1 + x/t_c)^r"
+    if kernel == "weibull":
+        return "D = exp((x/t_c)^r), so K = exp(-(x/t_c)^r)"
     raise ValueError(f"Unknown transient kernel: {kernel}")
 
 
@@ -132,6 +136,9 @@ def transition_denom(x: np.ndarray, tc: np.ndarray, r: float, kernel: str) -> np
         return 1.0 + np.power(x_over_tc, r)
     if kernel == "shifted":
         return np.power(1.0 + x_over_tc, r)
+    if kernel == "weibull":
+        exponent = np.minimum(np.power(x_over_tc, r), 700.0)
+        return np.exp(exponent)
     raise ValueError(f"Unknown transient kernel: {kernel}")
 
 
